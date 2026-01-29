@@ -1,10 +1,10 @@
 [project]
 name = "mcp-server-lammps"
-version = "0.0.1"
+version = "0.0.2"
 description = "A Model Context Protocol server for LAMMPS molecular dynamics simulator"
 readme = "README.md"
 requires-python = ">=3.10"
-authors = [{ name = "MCP LAMMPS Team" }]
+authors = [{ name = "Zois Li" }]
 license = { text = "MIT" }
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -27,4 +27,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
-dev = ["pyright>=1.1.407", "ruff>=0.7.3", "pytest>=8.0.0"]
+dev = ["pyright>=1.1.407", "pytest>=8.0.0"]
