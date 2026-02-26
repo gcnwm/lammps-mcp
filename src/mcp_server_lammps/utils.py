@@ -6,7 +6,7 @@ import subprocess
 import multiprocessing
 import re
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,41 @@ def get_lammps_capabilities(binary: str) -> Dict[str, Any]:
         logger.error(f"Error getting LAMMPS capabilities: {e}")
 
     return caps
+
+def optimize_lammps_command(binary: str) -> List[str]:
+    """
+    Determine the best command line arguments for LAMMPS based on system resources
+    and binary capabilities.
+    """
+    sys_info = get_system_info()
+    caps = get_lammps_capabilities(binary)
+    cores = sys_info["cpu_cores"]
+
+    cmd = []
+
+    # Priority 1: KOKKOS (High Performance)
+    if "KOKKOS" in caps["packages"]:
+        cmd.extend([binary, "-k", "on", "t", str(cores), "-sf", "kk"])
+        return cmd
+
+    # Priority 2: MPI + OPENMP
+    if sys_info["mpi_available"] and "OPENMP" in caps["packages"]:
+        # Standard heuristic: 1 MPI task per 2-4 cores, OMP_NUM_THREADS for the rest
+        # For simplicity and robustness in diverse environments, we'll try to use a balanced approach
+        # but often just running with MPI is best if available.
+        # However, many users don't have MPI configured for multi-node on their desktops.
+        # We will default to mpiexec -np <cores> if available.
+        mpi_cmd = "mpiexec" if shutil.which("mpiexec") else "mpirun"
+        cmd.extend([mpi_cmd, "-np", str(cores), binary, "-sf", "omp"])
+        return cmd
+
+    # Priority 3: Pure OPENMP (Serial Binary)
+    if "OPENMP" in caps["packages"]:
+        cmd.extend([binary, "-sf", "omp", "-pk", "omp", str(cores)])
+        return cmd
+
+    # Fallback: Simple Serial
+    return [binary]
 
 def find_lammps_binary() -> Optional[str]:
     """

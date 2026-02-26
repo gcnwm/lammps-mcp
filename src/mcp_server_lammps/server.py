@@ -19,64 +19,28 @@ import secrets
 
 logger = logging.getLogger(__name__)
 
-class LammpsRun(BaseModel):
-    input_file: Optional[str] = Field(None, description="Path to the input script file relative to working directory (uses -in)")
-    log_file: Optional[str] = Field("log.lammps", description="Path to the output log file (uses -log)")
-    screen_file: Optional[str] = Field(None, description="Path to the screen output file (uses -screen). Set to 'none' to suppress.")
-    variables: Optional[Dict[str, Union[str, List[str]]]] = Field(None, description="Dictionary of variables to define (uses -var name value1 value2 ...)")
-    suffix: Optional[List[str]] = Field(None, description="Suffix style to use (uses -sf, e.g., ['omp'])")
-    package: Optional[List[List[str]]] = Field(None, description="Package command arguments (uses -pk, e.g., [['omp', '4']])")
-
-    echo: Optional[str] = Field(None, description="Echo style: none, screen, log, both (uses -echo)")
-    kokkos: Optional[List[str]] = Field(None, description="Kokkos options (uses -kokkos on/off ...)")
-    mdi: Optional[str] = Field(None, description="MDI flags (uses -mdi)")
-    mpicolor: Optional[int] = Field(None, description="MPI color (uses -mpicolor)")
-    cite: Optional[str] = Field(None, description="Citation style or filename (uses -cite)")
-    nocite: bool = Field(False, description="Disable citation reminder (uses -nocite)")
-    nonbuf: bool = Field(False, description="Turn off buffering for screen and logfile (uses -nonbuf)")
-    partition: Optional[List[str]] = Field(None, description="Multi-partition mode settings (uses -partition)")
-    plog: Optional[str] = Field(None, description="Base name for partition log files (uses -plog)")
-    pscreen: Optional[str] = Field(None, description="Base name for partition screen files (uses -pscreen)")
-    reorder: Optional[List[str]] = Field(None, description="Processor reordering (uses -reorder)")
-    skiprun: bool = Field(False, description="Skip run and minimize commands for testing (uses -skiprun)")
-
-    restart2data: Optional[List[str]] = Field(None, description="Convert restart to data (uses -r2data restartfile datafile ...)")
-    restart2dump: Optional[List[str]] = Field(None, description="Convert restart to dump (uses -r2dump restartfile group-ID style file ...)")
-    restart2info: Optional[List[str]] = Field(None, description="Output restart info (uses -r2info restartfile ...)")
-
-    options: Optional[List[str]] = Field(None, description="Additional raw command line options")
+class LammpsSubmitScript(BaseModel):
+    script_content: str = Field(..., description="The content of the LAMMPS input script to execute.")
+    script_name: str = Field("in.lammps", description="The name to save the input script as.")
+    log_file: str = Field("log.lammps", description="The name of the log file to generate.")
 
 class LammpsReadLog(BaseModel):
-    log_file: str = Field(..., description="Path to the log file to read")
-    get_all_steps: bool = Field(False, description="If true, returns all steps. If false, returns only the final thermo data.")
-    extract_performance: bool = Field(False, description="If true, extracts and returns performance/timing data.")
+    log_file: str = Field("log.lammps", description="Path to the log file to read (relative to working directory or latest archive).")
+    extract_performance: bool = Field(True, description="If true, extracts and returns performance/timing data.")
 
-class LammpsRestart2Data(BaseModel):
-    restart_file: str = Field(..., description="Path to the binary restart file")
-    data_file: str = Field(..., description="Path to the output data file")
+class LammpsReadOutput(BaseModel):
+    filepath: str = Field(..., description="Path to the output file to read (relative to working directory or latest archive).")
 
-class LammpsUploadFile(BaseModel):
-    filepath: str = Field(..., description="Path to save the file relative to working directory")
-    content: str = Field(..., description="Content of the file")
-
-class LammpsReadFile(BaseModel):
-    filepath: str = Field(..., description="Path to the file to read relative to working directory")
-
-class LammpsListFiles(BaseModel):
-    directory: str = Field(".", description="Directory to list relative to working directory")
-
-class LammpsGetInfo(BaseModel):
-    pass
+class LammpsRestart(BaseModel):
+    restart_file: str = Field(..., description="Path to the binary restart file.")
+    action: str = Field("data", description="Action to perform: 'data' (convert to data file), 'info' (get restart info), 'dump' (convert to dump).")
+    output_file: Optional[str] = Field(None, description="Path to the output file (required for 'data' and 'dump').")
 
 class LammpsTools(str, Enum):
-    RUN = "run"
+    SUBMIT_SCRIPT = "submit_script"
     READ_LOG = "read_log"
-    GET_THERMO = "get_thermo"
-    RESTART2DATA = "restart2data"
-    UPLOAD_FILE = "upload_file"
-    READ_FILE = "read_file"
-    LIST_FILES = "list_files"
-    GET_INFO = "get_info"
+    READ_OUTPUT = "read_output"
+    RESTART = "restart"
 
 def validate_path(path_str: str, working_dir: Path) -> Path:
     working_dir = working_dir.resolve()
@@ -89,68 +53,32 @@ def validate_path(path_str: str, working_dir: Path) -> Path:
         path.relative_to(working_dir)
         return path
     except (ValueError, RuntimeError):
+        # Allow reading from archives if it exists
+        if "archives" in path_str:
+             return (working_dir / path_str).resolve()
         raise ValueError(f"Path '{path_str}' is outside the working directory")
 
-async def run_lammps(binary_cmd: List[str], working_dir: Path, args: LammpsRun) -> str:
-    cmd = list(binary_cmd)
-    if args.input_file:
-        input_path = validate_path(args.input_file, working_dir)
-        cmd.extend(["-in", str(input_path)])
-    if args.log_file:
-        if args.log_file.lower() == "none":
-            cmd.extend(["-log", "none"])
-        else:
-            log_path = validate_path(args.log_file, working_dir)
-            cmd.extend(["-log", str(log_path)])
-    if args.screen_file:
-        if args.screen_file.lower() == "none":
-            cmd.extend(["-screen", "none"])
-        else:
-            screen_path = validate_path(args.screen_file, working_dir)
-            cmd.extend(["-screen", str(screen_path)])
-    if args.variables:
-        for key, values in args.variables.items():
-            cmd.append("-var")
-            cmd.append(str(key))
-            if isinstance(values, list):
-                cmd.extend([str(v) for v in values])
-            else:
-                cmd.append(str(values))
-    if args.suffix:
-        cmd.append("-suffix")
-        cmd.extend(args.suffix)
-    if args.package:
-        for pkg_args in args.package:
-            cmd.append("-package")
-            cmd.extend(pkg_args)
-    if args.echo: cmd.extend(["-echo", args.echo])
-    if args.kokkos:
-        cmd.append("-kokkos")
-        cmd.extend(args.kokkos)
-    if args.mdi: cmd.extend(["-mdi", args.mdi])
-    if args.mpicolor is not None: cmd.extend(["-mpicolor", str(args.mpicolor)])
-    if args.cite: cmd.extend(["-cite", args.cite])
-    if args.nocite: cmd.append("-nocite")
-    if args.nonbuf: cmd.append("-nonbuf")
-    if args.partition:
-        cmd.append("-partition")
-        cmd.extend(args.partition)
-    if args.plog: cmd.extend(["-plog", args.plog])
-    if args.pscreen: cmd.extend(["-pscreen", args.pscreen])
-    if args.reorder:
-        cmd.append("-reorder")
-        cmd.extend(args.reorder)
-    if args.skiprun: cmd.append("-skiprun")
-    if args.restart2data:
-        cmd.append("-restart2data")
-        cmd.extend(args.restart2data)
-    if args.restart2dump:
-        cmd.append("-restart2dump")
-        cmd.extend(args.restart2dump)
-    if args.restart2info:
-        cmd.append("-restart2info")
-        cmd.extend(args.restart2info)
-    if args.options: cmd.extend(args.options)
+def find_latest_archive(working_dir: Path) -> Optional[Path]:
+    archive_base = working_dir / "archives"
+    if not archive_base.exists():
+        return None
+    dirs = sorted([d for d in archive_base.iterdir() if d.is_dir()], reverse=True)
+    return dirs[0] if dirs else None
+
+async def run_optimized_lammps(binary: str, working_dir: Path, script_content: str, script_name: str, log_file: str) -> str:
+    from .utils import optimize_lammps_command
+
+    # Save script
+    script_path = working_dir / script_name
+    with open(script_path, "w") as f:
+        f.write(script_content)
+
+    # Get optimized base command
+    base_cmd = optimize_lammps_command(binary)
+
+    # Construct full command
+    cmd = list(base_cmd)
+    cmd.extend(["-in", script_name, "-log", log_file])
     
     try:
         import asyncio
@@ -164,67 +92,31 @@ async def run_lammps(binary_cmd: List[str], working_dir: Path, args: LammpsRun) 
         stdout_text = stdout.decode()
         stderr_text = stderr.decode()
 
-        if process.returncode != 0:
-            return f"Simulation failed with code {process.returncode}.\nStderr:\n{stderr_text}\nStdout:\n{stdout_text}"
-
-        output = "Simulation completed successfully."
+        # Archiving
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         archive_dir = working_dir / "archives" / timestamp
         archive_dir.mkdir(parents=True, exist_ok=True)
-        if args.input_file:
-            try: shutil.copy2(working_dir / args.input_file, archive_dir)
-            except Exception: pass
-        if args.log_file and args.log_file.lower() != "none":
-            try:
-                p = working_dir / args.log_file
-                if p.exists(): shutil.copy2(p, archive_dir)
-            except Exception: pass
+
+        # Copy input and log
+        shutil.copy2(script_path, archive_dir)
+        log_path = working_dir / log_file
+        if log_path.exists():
+            shutil.copy2(log_path, archive_dir)
+
         with open(archive_dir / "stdout.log", "w") as f: f.write(stdout_text)
         with open(archive_dir / "stderr.log", "w") as f: f.write(stderr_text)
-        output += f"\nArchived to {archive_dir.relative_to(working_dir)}"
+
+        if process.returncode != 0:
+            return f"Simulation failed with code {process.returncode}.\nStderr:\n{stderr_text}\nStdout head:\n{stdout_text[:500]}"
+
+        output = f"Simulation completed successfully.\nCommand used: {' '.join(cmd)}\nArchived to: archives/{timestamp}\n\n"
+        output += parse_thermo_from_log(log_path, extract_performance=True)
         return output
     except Exception as e:
         return f"Simulation error: {str(e)}"
 
-async def convert_restart2data(binary_cmd: List[str], working_dir: Path, restart_file: str, data_file: str) -> str:
-    restart_path = validate_path(restart_file, working_dir)
-    data_path = validate_path(data_file, working_dir)
-    cmd = list(binary_cmd) + ["-restart2data", str(restart_path), str(data_path)]
-    try:
-        import asyncio
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(working_dir),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await process.communicate()
-        if process.returncode != 0:
-            return f"Conversion failed.\n{stderr.decode()}"
-        return f"Conversion successful.\n{stdout.decode()}"
-    except Exception as e:
-        return f"Conversion error: {str(e)}"
-
-def upload_file(working_dir: Path, filepath: str, content: str) -> str:
-    target_path = validate_path(filepath, working_dir)
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(target_path, "w") as f: f.write(content)
-    return f"File uploaded to {filepath}"
-
-def read_file(working_dir: Path, filepath: str) -> str:
-    target_path = validate_path(filepath, working_dir)
-    if not target_path.exists(): return f"File {filepath} not found."
-    with open(target_path, "r") as f: return f.read()
-
-def list_files(working_dir: Path, directory: str) -> str:
-    target_dir = validate_path(directory, working_dir)
-    if not target_dir.exists() or not target_dir.is_dir(): return f"Not a directory: {directory}"
-    files = [f"{item.relative_to(working_dir)}{'/' if item.is_dir() else ''}" for item in target_dir.iterdir()]
-    return "\n".join(files) if files else "Directory is empty."
-
-def parse_log(working_dir: Path, log_file: str, all_steps: bool, extract_performance: bool) -> str:
-    log_path = validate_path(log_file, working_dir)
-    if not log_path.exists(): return f"Log file {log_file} not found."
+def parse_thermo_from_log(log_path: Path, extract_performance: bool) -> str:
+    if not log_path.exists(): return f"Log file {log_path} not found."
     try:
         with open(log_path, 'r') as f: content = f.read()
         output_parts = []
@@ -253,67 +145,82 @@ def parse_log(working_dir: Path, log_file: str, all_steps: bool, extract_perform
                         current_block.append([p.replace("--", "-") for p in parts])
                     except ValueError: pass
         if data_blocks:
-            output_parts.append("Thermodynamic Data:")
+            output_parts.append("Thermodynamic Data Summary:")
             for i, (head, block) in enumerate(data_blocks):
                 output_parts.append(f"Run {i+1}: {', '.join(head)}")
-                if all_steps:
-                    for row in block: output_parts.append("  " + " ".join(row))
-                elif block: output_parts.append(f"  Final: {' '.join(block[-1])}")
+                if block: output_parts.append(f"  Final State: {' '.join(block[-1])}")
         if extract_performance:
             matches = re.findall(r"(Loop time of.*?)(?=\n\s*\n|Step|$)", content, re.DOTALL)
             if matches:
-                output_parts.append("\nPerformance Data:")
+                output_parts.append("\nPerformance Summary:")
                 for i, m in enumerate(matches): output_parts.append(f"Run {i+1}:\n{m.strip()}")
-        return "\n".join(output_parts) or "No data found."
-    except Exception as e: return f"Error: {str(e)}"
+        return "\n".join(output_parts) or "No relevant data found in log."
+    except Exception as e: return f"Error parsing log: {str(e)}"
 
 async def serve(lammps_binary: str, working_directory: Path, remote: bool = False, host: str = "0.0.0.0", port: int = 8000) -> None:
-    from .utils import get_system_info, get_lammps_capabilities
     server = Server("mcp-lammps")
     working_directory = working_directory.expanduser().resolve()
     working_directory.mkdir(parents=True, exist_ok=True)
-    binary_cmd = shlex.split(lammps_binary, posix=(os.name != 'nt'))
     
     @server.list_tools()
     async def list_tools() -> list[Tool]:
         return [
-            Tool(name=LammpsTools.RUN, description="Run LAMMPS", inputSchema=LammpsRun.model_json_schema()),
-            Tool(name=LammpsTools.READ_LOG, description="Read log", inputSchema=LammpsReadLog.model_json_schema()),
-            Tool(name=LammpsTools.GET_THERMO, description="Get thermo", inputSchema=LammpsReadLog.model_json_schema()),
-            Tool(name=LammpsTools.RESTART2DATA, description="Restart to data", inputSchema=LammpsRestart2Data.model_json_schema()),
-            Tool(name=LammpsTools.UPLOAD_FILE, description="Upload file", inputSchema=LammpsUploadFile.model_json_schema()),
-            Tool(name=LammpsTools.READ_FILE, description="Read file", inputSchema=LammpsReadFile.model_json_schema()),
-            Tool(name=LammpsTools.LIST_FILES, description="List files", inputSchema=LammpsListFiles.model_json_schema()),
-            Tool(name=LammpsTools.GET_INFO, description="Get info", inputSchema=LammpsGetInfo.model_json_schema()),
+            Tool(name=LammpsTools.SUBMIT_SCRIPT, description="Submit a LAMMPS input script for automated execution.", inputSchema=LammpsSubmitScript.model_json_schema()),
+            Tool(name=LammpsTools.READ_LOG, description="Extract thermodynamic and performance data from a log file.", inputSchema=LammpsReadLog.model_json_schema()),
+            Tool(name=LammpsTools.READ_OUTPUT, description="Read the content of an output file (data, dump, custom).", inputSchema=LammpsReadOutput.model_json_schema()),
+            Tool(name=LammpsTools.RESTART, description="Manage binary restart files (convert to data/dump or get info).", inputSchema=LammpsRestart.model_json_schema()),
         ]
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         match name:
-            case LammpsTools.RUN:
-                res = await run_lammps(binary_cmd, working_directory, LammpsRun(**arguments))
+            case LammpsTools.SUBMIT_SCRIPT:
+                args = LammpsSubmitScript(**arguments)
+                res = await run_optimized_lammps(lammps_binary, working_directory, args.script_content, args.script_name, args.log_file)
                 return [TextContent(type="text", text=res)]
-            case LammpsTools.READ_LOG | LammpsTools.GET_THERMO:
+
+            case LammpsTools.READ_LOG:
                 args = LammpsReadLog(**arguments)
-                return [TextContent(type="text", text=parse_log(working_directory, args.log_file, args.get_all_steps, args.extract_performance))]
-            case LammpsTools.RESTART2DATA:
-                args = LammpsRestart2Data(**arguments)
-                res = await convert_restart2data(binary_cmd, working_directory, args.restart_file, args.data_file)
+                path = validate_path(args.log_file, working_directory)
+                if not path.exists():
+                    latest = find_latest_archive(working_directory)
+                    if latest and (latest / args.log_file).exists():
+                        path = latest / args.log_file
+                res = parse_thermo_from_log(path, args.extract_performance)
                 return [TextContent(type="text", text=res)]
-            case LammpsTools.UPLOAD_FILE:
-                args = LammpsUploadFile(**arguments)
-                return [TextContent(type="text", text=upload_file(working_directory, args.filepath, args.content))]
-            case LammpsTools.READ_FILE:
-                args = LammpsReadFile(**arguments)
-                return [TextContent(type="text", text=read_file(working_directory, args.filepath))]
-            case LammpsTools.LIST_FILES:
-                args = LammpsListFiles(**arguments)
-                return [TextContent(type="text", text=list_files(working_directory, args.directory))]
-            case LammpsTools.GET_INFO:
-                sys_info = get_system_info()
-                lammps_caps = get_lammps_capabilities(binary_cmd[0])
-                res = f"System: {sys_info}\nLAMMPS: Binary={binary_cmd}, Version={lammps_caps['version']}, Packages={lammps_caps['packages']}"
-                return [TextContent(type="text", text=res)]
+
+            case LammpsTools.READ_OUTPUT:
+                args = LammpsReadOutput(**arguments)
+                path = validate_path(args.filepath, working_directory)
+                if not path.exists():
+                     latest = find_latest_archive(working_directory)
+                     if latest and (latest / args.filepath).exists():
+                         path = latest / args.filepath
+                if not path.exists(): return [TextContent(type="text", text=f"File {args.filepath} not found.")]
+                with open(path, "r") as f:
+                    return [TextContent(type="text", text=f.read(10000) + ("\n...(truncated)" if path.stat().st_size > 10000 else ""))]
+
+            case LammpsTools.RESTART:
+                args = LammpsRestart(**arguments)
+                path = validate_path(args.restart_file, working_directory)
+                cmd = [lammps_binary]
+                if args.action == "data":
+                    if not args.output_file: return [TextContent(type="text", text="output_file is required for 'data' action.")]
+                    cmd.extend(["-restart2data", str(path), args.output_file])
+                elif args.action == "info":
+                    cmd.extend(["-restart2info", str(path)])
+                elif args.action == "dump":
+                    if not args.output_file: return [TextContent(type="text", text="output_file is required for 'dump' action.")]
+                    cmd.extend(["-restart2dump", str(path), "all", "atom", args.output_file])
+
+                try:
+                    import asyncio
+                    process = await asyncio.create_subprocess_exec(*cmd, cwd=str(working_directory), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                    stdout, stderr = await process.communicate()
+                    return [TextContent(type="text", text=f"Action '{args.action}' completed.\nStdout: {stdout.decode()}\nStderr: {stderr.decode()}")]
+                except Exception as e:
+                    return [TextContent(type="text", text=f"Restart error: {str(e)}")]
+
             case _: raise ValueError(f"Unknown tool: {name}")
 
     options = server.create_initialization_options()
