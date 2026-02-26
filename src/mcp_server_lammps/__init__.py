@@ -25,7 +25,7 @@ def main(
     remote: bool,
     host: str,
     port: int,
-    verbose: bool
+    verbose: bool,
 ) -> None:
     """MCP LAMMPS Server - LAMMPS functionality for MCP"""
     import asyncio
@@ -40,7 +40,9 @@ def main(
         logging_level = logging.DEBUG
 
     logging.basicConfig(level=logging_level, stream=sys.stderr)
-    asyncio.run(serve(lammps_binary, working_directory, remote=remote, host=host, port=port))
+    asyncio.run(
+        serve(lammps_binary, working_directory, remote=remote, host=host, port=port)
+    )
 
 
 if __name__ == "__main__":

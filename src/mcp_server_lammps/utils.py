@@ -10,14 +10,17 @@ from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
+
 def get_system_info() -> Dict[str, Any]:
     """Get information about the system environment."""
     info = {
         "os": sys.platform,
         "cpu_cores": multiprocessing.cpu_count(),
-        "mpi_available": shutil.which("mpirun") is not None or shutil.which("mpiexec") is not None,
+        "mpi_available": shutil.which("mpirun") is not None
+        or shutil.which("mpiexec") is not None,
     }
     return info
+
 
 def get_lammps_capabilities(binary: str) -> Dict[str, Any]:
     """Get capabilities of the LAMMPS binary by running lmp -h."""
@@ -30,7 +33,9 @@ def get_lammps_capabilities(binary: str) -> Dict[str, Any]:
         if not Path(binary).exists() and not shutil.which(binary):
             return caps
 
-        result = subprocess.run([binary, "-h"], capture_output=True, text=True, timeout=5)
+        result = subprocess.run(
+            [binary, "-h"], capture_output=True, text=True, timeout=5
+        )
         output = result.stdout
 
         # Parse version
@@ -47,6 +52,7 @@ def get_lammps_capabilities(binary: str) -> Dict[str, Any]:
         logger.error(f"Error getting LAMMPS capabilities: {e}")
 
     return caps
+
 
 def optimize_lammps_command(binary: str) -> List[str]:
     """
@@ -82,6 +88,7 @@ def optimize_lammps_command(binary: str) -> List[str]:
 
     # Fallback: Simple Serial
     return [binary]
+
 
 def find_lammps_binary() -> Optional[str]:
     """

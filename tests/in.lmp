@@ -1,0 +1,58 @@
+# LAMMPS Input Script for Argon Melting Simulation
+units           real
+atom_style      atomic
+boundary        p p p
+
+# Argon Parameters
+variable        mass equal 39.948
+variable        epsilon equal 0.238
+variable        sigma equal 3.405
+variable        cutoff equal 2.5*${sigma}
+
+# Lattice Setup (FCC)
+lattice         fcc 5.3
+region          sim_box block 0 5 0 5 0 5
+create_box      1 sim_box
+create_atoms    1 box
+mass            1 ${mass}
+
+pair_style      lj/cut ${cutoff}
+pair_coeff      1 1 ${epsilon} ${sigma}
+
+neighbor        2.0 bin
+neigh_modify    delay 0 every 1 check yes
+
+# Minimization
+minimize        1.0e-4 1.0e-6 100 1000
+
+# Equilibration (NPT at 20K)
+velocity        all create 20.0 12345 dist gaussian
+fix             1 all npt temp 20.0 20.0 100.0 iso 1.0 1.0 1000.0
+thermo          100
+run             5000
+unfix           1
+
+# Production (Stepwise Heating NVT)
+dump            1 all xyz 1000 traj.xyz
+thermo          1000
+variable        temps index 20 40 60 70 75 80 82 84 86 88 90 100 115 130
+
+# RDF Compute
+compute         rdf all rdf 100
+
+label           loop_start
+variable        t equal ${temps}
+
+# NVT Simulation
+fix             1 all nvt temp $t $t 100.0
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_$t.dat mode vector
+variable        avg_pe equal pe
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_$t.dat
+
+run             5000
+
+unfix           rdf_out
+unfix           1
+unfix           pe_avg
+next            temps
+jump            SELF loop_start

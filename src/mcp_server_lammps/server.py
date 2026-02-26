@@ -4,6 +4,7 @@ from typing import Optional
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import (
+    CallToolResult,
     TextContent,
     Tool,
 )
@@ -136,13 +137,16 @@ async def run_optimized_lammps(
             f.write(stderr_text)
 
         if process.returncode != 0:
-            return f"Simulation failed with code {process.returncode}.\nStderr:\n{stderr_text}\nStdout head:\n{stdout_text[:500]}"
+            raise RuntimeError(
+                f"Simulation failed with code {process.returncode}.\n"
+                f"Stderr:\n{stderr_text}\nStdout head:\n{stdout_text[:500]}"
+            )
 
         output = f"Simulation completed successfully.\nCommand used: {' '.join(cmd)}\nArchived to: archives/{timestamp}\n\n"
         output += parse_thermo_from_log(log_path, extract_performance=True)
         return output
     except Exception as e:
-        return f"Simulation error: {str(e)}"
+        raise RuntimeError(f"Simulation error: {str(e)}")
 
 
 def parse_thermo_from_log(log_path: Path, extract_performance: bool) -> str:
@@ -236,17 +240,25 @@ async def serve(
         ]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    async def call_tool(
+        name: str, arguments: dict
+    ) -> list[TextContent] | CallToolResult:
         match name:
             case LammpsTools.SUBMIT_SCRIPT:
                 args = LammpsSubmitScript(**arguments)
-                res = await run_optimized_lammps(
-                    lammps_binary,
-                    working_directory,
-                    args.script_content,
-                    args.script_name,
-                    args.log_file,
-                )
+                try:
+                    res = await run_optimized_lammps(
+                        lammps_binary,
+                        working_directory,
+                        args.script_content,
+                        args.script_name,
+                        args.log_file,
+                    )
+                except RuntimeError as e:
+                    return CallToolResult(
+                        content=[TextContent(type="text", text=str(e))],
+                        isError=True,
+                    )
                 return [TextContent(type="text", text=res)]
 
             case LammpsTools.READ_LOG:
@@ -267,11 +279,15 @@ async def serve(
                     if latest and (latest / args.filepath).exists():
                         path = latest / args.filepath
                 if not path.exists():
-                    return [
-                        TextContent(
-                            type="text", text=f"File {args.filepath} not found."
-                        )
-                    ]
+                    return CallToolResult(
+                        content=[
+                            TextContent(
+                                type="text",
+                                text=f"File {args.filepath} not found.",
+                            )
+                        ],
+                        isError=True,
+                    )
                 with open(path, "r") as f:
                     return [
                         TextContent(
@@ -291,25 +307,41 @@ async def serve(
                 cmd = [lammps_binary]
                 if args.action == "data":
                     if not args.output_file:
-                        return [
-                            TextContent(
-                                type="text",
-                                text="output_file is required for 'data' action.",
-                            )
-                        ]
+                        return CallToolResult(
+                            content=[
+                                TextContent(
+                                    type="text",
+                                    text="output_file is required for 'data' action.",
+                                )
+                            ],
+                            isError=True,
+                        )
                     cmd.extend(["-restart2data", str(path), args.output_file])
                 elif args.action == "info":
                     cmd.extend(["-restart2info", str(path)])
                 elif args.action == "dump":
                     if not args.output_file:
-                        return [
-                            TextContent(
-                                type="text",
-                                text="output_file is required for 'dump' action.",
-                            )
-                        ]
+                        return CallToolResult(
+                            content=[
+                                TextContent(
+                                    type="text",
+                                    text="output_file is required for 'dump' action.",
+                                )
+                            ],
+                            isError=True,
+                        )
                     cmd.extend(
                         ["-restart2dump", str(path), "all", "atom", args.output_file]
+                    )
+                else:
+                    return CallToolResult(
+                        content=[
+                            TextContent(
+                                type="text",
+                                text=f"Unknown action: {args.action}. Use 'data', 'info', or 'dump'.",
+                            )
+                        ],
+                        isError=True,
                     )
 
                 try:
@@ -322,6 +354,17 @@ async def serve(
                         stderr=asyncio.subprocess.PIPE,
                     )
                     stdout, stderr = await process.communicate()
+                    if process.returncode != 0:
+                        return CallToolResult(
+                            content=[
+                                TextContent(
+                                    type="text",
+                                    text=f"Action '{args.action}' failed (code {process.returncode}).\n"
+                                    f"Stderr: {stderr.decode()}",
+                                )
+                            ],
+                            isError=True,
+                        )
                     return [
                         TextContent(
                             type="text",
@@ -329,7 +372,15 @@ async def serve(
                         )
                     ]
                 except Exception as e:
-                    return [TextContent(type="text", text=f"Restart error: {str(e)}")]
+                    return CallToolResult(
+                        content=[
+                            TextContent(
+                                type="text",
+                                text=f"Restart error: {str(e)}",
+                            )
+                        ],
+                        isError=True,
+                    )
 
             case _:
                 raise ValueError(f"Unknown tool: {name}")
@@ -348,7 +399,9 @@ async def serve(
         async def handle_sse(request):
             if request.query_params.get("token") != token:
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
-            async with sse.connect_sse(request.scope, request.receive, request._send) as (read_stream, write_stream):
+            async with sse.connect_sse(
+                request.scope, request.receive, request._send
+            ) as (read_stream, write_stream):
                 await server.run(
                     read_stream, write_stream, options, raise_exceptions=True
                 )
