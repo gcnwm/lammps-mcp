@@ -11,7 +11,6 @@ from mcp.types import (
 from enum import Enum
 from pydantic import BaseModel, Field
 import re
-import shutil
 from datetime import datetime
 import secrets
 
@@ -87,13 +86,35 @@ def find_latest_archive(working_dir: Path) -> Optional[Path]:
     return dirs[0] if dirs else None
 
 
+def find_latest_run_directory(working_dir: Path) -> Optional[Path]:
+    run_pattern = re.compile(r"^\d{8}_\d{6}(?:_\d{6})?_.+")
+    run_dirs = sorted(
+        [
+            d
+            for d in working_dir.iterdir()
+            if d.is_dir() and d.name != "archives" and run_pattern.match(d.name)
+        ],
+        reverse=True,
+    )
+    return run_dirs[0] if run_dirs else None
+
+
 async def run_optimized_lammps(
     binary: str, working_dir: Path, script_content: str, script_name: str, log_file: str
 ) -> str:
     from .utils import optimize_lammps_command
 
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    script_file_name = Path(script_name).name or "in.lammps"
+    safe_script_name = re.sub(r"[^A-Za-z0-9._-]+", "_", script_file_name)
+    run_dir = working_dir / f"{timestamp}_{safe_script_name}"
+    run_dir.mkdir(parents=True, exist_ok=False)
+
+    script_path = validate_path(script_file_name, run_dir)
+    log_file_name = Path(log_file).name or "log.lammps"
+    log_path = validate_path(log_file_name, run_dir)
+
     # Save script
-    script_path = working_dir / script_name
     with open(script_path, "w") as f:
         f.write(script_content)
 
@@ -102,14 +123,14 @@ async def run_optimized_lammps(
 
     # Construct full command
     cmd = list(base_cmd)
-    cmd.extend(["-in", script_name, "-log", log_file])
+    cmd.extend(["-in", script_file_name, "-log", log_file_name])
 
     try:
         import asyncio
 
         process = await asyncio.create_subprocess_exec(
             *cmd,
-            cwd=str(working_dir),
+            cwd=str(run_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -117,20 +138,9 @@ async def run_optimized_lammps(
         stdout_text = stdout.decode()
         stderr_text = stderr.decode()
 
-        # Archiving
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        archive_dir = working_dir / "archives" / timestamp
-        archive_dir.mkdir(parents=True, exist_ok=True)
-
-        # Copy input and log
-        shutil.copy2(script_path, archive_dir)
-        log_path = working_dir / log_file
-        if log_path.exists():
-            shutil.copy2(log_path, archive_dir)
-
-        with open(archive_dir / "stdout.log", "w") as f:
+        with open(run_dir / "stdout.log", "w") as f:
             f.write(stdout_text)
-        with open(archive_dir / "stderr.log", "w") as f:
+        with open(run_dir / "stderr.log", "w") as f:
             f.write(stderr_text)
 
         if process.returncode != 0:
@@ -139,7 +149,12 @@ async def run_optimized_lammps(
                 f"Stderr:\n{stderr_text}\nStdout head:\n{stdout_text[:500]}"
             )
 
-        output = f"Simulation completed successfully.\nCommand used: {' '.join(cmd)}\nArchived to: archives/{timestamp}\n\n"
+        run_dir_relative = run_dir.relative_to(working_dir)
+        output = (
+            f"Simulation completed successfully.\n"
+            f"Command used: {' '.join(cmd)}\n"
+            f"Run directory: {run_dir_relative}\n\n"
+        )
         output += parse_thermo_from_log(log_path, extract_performance=True)
         return output
     except Exception as e:
@@ -262,6 +277,16 @@ async def serve(
                 args = LammpsReadLog(**arguments)
                 path = validate_path(args.log_file, working_directory)
                 if not path.exists():
+                    latest_run = find_latest_run_directory(working_directory)
+                    if latest_run:
+                        latest_run_path = latest_run / args.log_file
+                        if latest_run_path.exists():
+                            path = latest_run_path
+                        else:
+                            latest_run_name_path = latest_run / Path(args.log_file).name
+                            if latest_run_name_path.exists():
+                                path = latest_run_name_path
+                if not path.exists():
                     latest = find_latest_archive(working_directory)
                     if latest and (latest / args.log_file).exists():
                         path = latest / args.log_file
@@ -271,6 +296,16 @@ async def serve(
             case LammpsTools.READ_OUTPUT:
                 args = LammpsReadOutput(**arguments)
                 path = validate_path(args.filepath, working_directory)
+                if not path.exists():
+                    latest_run = find_latest_run_directory(working_directory)
+                    if latest_run:
+                        latest_run_path = latest_run / args.filepath
+                        if latest_run_path.exists():
+                            path = latest_run_path
+                        else:
+                            latest_run_name_path = latest_run / Path(args.filepath).name
+                            if latest_run_name_path.exists():
+                                path = latest_run_name_path
                 if not path.exists():
                     latest = find_latest_archive(working_directory)
                     if latest and (latest / args.filepath).exists():
