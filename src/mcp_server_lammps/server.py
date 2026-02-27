@@ -76,9 +76,6 @@ def validate_path(path_str: str, working_dir: Path) -> Path:
         path.relative_to(working_dir)
         return path
     except (ValueError, RuntimeError):
-        # Allow reading from archives if it exists
-        if "archives" in path_str:
-            return (working_dir / path_str).resolve()
         raise ValueError(f"Path '{path_str}' is outside the working directory")
 
 
@@ -413,7 +410,7 @@ async def serve(
             debug=True,
             routes=[
                 Route("/sse", endpoint=handle_sse),
-                Route("/messages", endpoint=handle_messages, methods=["POST"]),
+                Route("/messages", endpoint=handle_messages, methods=["POST", "OPTIONS"]),
             ],
         )
         print(f"SSE URL: http://{host}:{port}/sse?token={token}")

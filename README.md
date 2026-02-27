@@ -6,34 +6,42 @@ A Model Context Protocol server for LAMMPS (Large-scale Atomic/Molecular Massive
 
 ### Tools
 
-1. `lammps_run`
-   - Run a LAMMPS simulation with extensive configuration options.
+1. `submit_script`
+   - Submit and execute a LAMMPS input script.
    - Inputs:
-     - `input_file`: Path to the input script (relative to working directory).
-     - `log_file`: Output log file path (default: "log.lammps").
-     - `screen_file`: Output screen file path (set to "none" to suppress).
-     - `variables`: Dictionary of variables to define (e.g., `{"temp": "300.0"}` maps to `-var temp 300.0`).
-     - `suffix`: Accelerator suffix style (e.g., "omp", "gpu").
-     - `package`: Package command arguments (e.g., `["omp", "4"]`).
-     - `options`: List of additional command-line flags (e.g., `["-partition", "8x2"]`).
+     - `script_content`: Full LAMMPS input script text.
+     - `script_name`: Saved input script filename (default: `in.lammps`).
+     - `log_file`: Log filename (default: `log.lammps`).
 
-2. `lammps_read_log`
-   - Read thermodynamic and performance data from a LAMMPS log file.
+2. `read_log`
+   - Extract thermodynamic and timing/performance data from a log file.
    - Inputs:
-     - `log_file`: Path to the log file.
-     - `get_all_steps`: If true, returns data for all steps; otherwise returns only the final state of each run.
-     - `extract_performance`: If true, extracts performance summaries (Loop time, MPI task breakdown, etc.).
+     - `log_file`: Path to log (default: `log.lammps`).
+     - `extract_performance`: Include loop/performance summary (default: `true`).
 
-3. `lammps_validate`
-   - Validate a LAMMPS input script (syntax check only).
+3. `read_output`
+   - Read output file content (data/dump/custom text output).
    - Inputs:
-     - `input_file`: Path to the input script.
+     - `filepath`: Path to output file.
 
-4. `lammps_restart2data`
-   - Convert a binary restart file to a text data file.
+4. `restart`
+   - Manage binary restart files.
    - Inputs:
-     - `restart_file`: Path to the binary restart file.
-     - `data_file`: Path to the output data file.
+     - `restart_file`: Path to restart file.
+     - `action`: `data`, `info`, or `dump`.
+     - `output_file`: Required for `data` and `dump`.
+
+## Debug script
+
+A fast smoke-test script is provided at `tests/debug_mcp_server.lmp`.
+
+Typical workflow:
+
+1. Start the server with a writable `--working-directory`.
+2. Call `submit_script` with the contents of `tests/debug_mcp_server.lmp`.
+3. Call `read_log` for `log.lammps`.
+4. Call `read_output` for `debug_out/state.data`.
+5. Call `restart` with `restart_file=debug_out/state.restart` and `action=info`.
 
 ## Installation
 

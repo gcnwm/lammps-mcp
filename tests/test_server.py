@@ -268,6 +268,13 @@ class TestValidatePath:
         path = validate_path("archives/20260101_120000/log.lammps", work_dir)
         assert "archives" in str(path)
 
+    def test_rejects_archives_traversal(self, tmp_path, work_dir):
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        sneaky = f"archives/../../{outside.name}/secret.log"
+        with pytest.raises(ValueError, match="outside the working directory"):
+            validate_path(sneaky, work_dir)
+
     def test_absolute_outside_rejected(self, tmp_path, work_dir):
         outside = tmp_path / "other"
         outside.mkdir()
