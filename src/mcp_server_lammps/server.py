@@ -386,6 +386,8 @@ async def serve(
     if remote:
         from mcp.server.sse import SseServerTransport
         from starlette.applications import Starlette
+        from starlette.requests import Request
+        from starlette.middleware.cors import CORSMiddleware
         from starlette.responses import JSONResponse
         from starlette.routing import Route
         import uvicorn
@@ -393,25 +395,50 @@ async def serve(
         token = secrets.token_urlsafe(16)
         sse = SseServerTransport("/messages")
 
-        async def handle_sse(request):
-            if request.query_params.get("token") != token:
-                return JSONResponse({"error": "Unauthorized"}, status_code=401)
-            async with sse.connect_sse(
-                request.scope, request.receive, request._send
-            ) as (read_stream, write_stream):
-                await server.run(
-                    read_stream, write_stream, options, raise_exceptions=True
-                )
+        class SseEndpoint:
+            async def __call__(self, scope, receive, send):
+                request = Request(scope, receive)
+                if request.method == "OPTIONS":
+                    await JSONResponse({}, status_code=200)(scope, receive, send)
+                    return
+                if request.query_params.get("token") != token:
+                    await JSONResponse(
+                        {"error": "Unauthorized"}, status_code=401
+                    )(scope, receive, send)
+                    return
 
-        async def handle_messages(request):
-            await sse.handle_post_message(request.scope, request.receive, request._send)
+                async with sse.connect_sse(scope, receive, send) as (
+                    read_stream,
+                    write_stream,
+                ):
+                    await server.run(
+                        read_stream, write_stream, options, raise_exceptions=True
+                    )
+
+        class MessagesEndpoint:
+            async def __call__(self, scope, receive, send):
+                request = Request(scope, receive)
+                if request.method == "OPTIONS":
+                    await JSONResponse({}, status_code=200)(scope, receive, send)
+                    return
+                await sse.handle_post_message(scope, receive, send)
 
         app = Starlette(
             debug=True,
             routes=[
-                Route("/sse", endpoint=handle_sse),
-                Route("/messages", endpoint=handle_messages, methods=["POST", "OPTIONS"]),
+                Route("/sse", endpoint=SseEndpoint(), methods=["GET", "OPTIONS"]),
+                Route(
+                    "/messages",
+                    endpoint=MessagesEndpoint(),
+                    methods=["POST", "OPTIONS"],
+                ),
             ],
+        )
+        app = CORSMiddleware(
+            app=app,
+            allow_origins=["*"],
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["*"],
         )
         print(f"SSE URL: http://{host}:{port}/sse?token={token}")
         config = uvicorn.Config(app, host=host, port=port, log_level="info")
