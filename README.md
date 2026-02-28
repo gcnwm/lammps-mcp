@@ -1,5 +1,7 @@
 # mcp-server-lammps: A LAMMPS MCP server
 
+> **Status**: In active development — not yet published to PyPI. Install from source with `uv run`.
+
 ## Overview
 
 A Model Context Protocol server for LAMMPS (Large-scale Atomic/Molecular Massively Parallel Simulator). This server allows Large Language Models to interact with LAMMPS to run simulations, validate scripts, manage files, and analyze output logs.
@@ -45,18 +47,59 @@ Typical workflow:
 
 ## Installation
 
-### Using uv (Recommended)
+### From source (recommended during development)
 
 ```bash
-uvx mcp-server-lammps
+# Clone the repository
+git clone <repo-url>
+cd lammps
+
+# Run directly via uv (stdio mode — default)
+uv run --directory /path/to/lammps mcp-server-lammps
+
+# Or with options
+uv run --directory /path/to/lammps mcp-server-lammps \
+  --lammps-binary /path/to/lmp \
+  --working-directory /path/to/simulations
 ```
 
-### Using pip
+## Usage
+
+### Stdio mode (default)
+
+The server runs over stdio by default, suitable for local MCP clients like Claude Desktop:
 
 ```bash
-pip install mcp-server-lammps
-python -m mcp_server_lammps
+uv run --directory /path/to/lammps mcp-server-lammps \
+  --lammps-binary /path/to/lmp \
+  --working-directory /path/to/simulations
 ```
+
+### Remote HTTP mode (`serve` subcommand)
+
+For remote deployment, use the `serve` subcommand which runs the server over StreamableHTTP:
+
+```bash
+# Bearer token required (token printed to stderr at startup)
+uv run --directory /path/to/lammps mcp-server-lammps serve \
+  --host 0.0.0.0 --port 8000
+
+# No authentication (not recommended for public networks)
+uv run --directory /path/to/lammps mcp-server-lammps serve --skip-auth
+
+# LAN IPs bypass auth; others need Bearer token
+uv run --directory /path/to/lammps mcp-server-lammps serve \
+  --allowed-ips 192.168.0.0/16 \
+  --allowed-ips 10.0.0.0/8
+```
+
+#### Auth modes
+
+| Mode | Flag | Behavior |
+|------|------|----------|
+| **Bearer token** (default) | _(none)_ | Auto-generated token printed to stderr; clients must send `Authorization: Bearer <token>` |
+| **Skip auth** | `--skip-auth` | No authentication required — use only on trusted networks |
+| **IP allowlist** | `--allowed-ips CIDR` | Listed IPs/CIDRs bypass auth; others require Bearer token. Can be specified multiple times |
 
 ## Configuration
 
@@ -67,8 +110,10 @@ Add this to your `claude_desktop_config.json`:
 ```json
 "mcpServers": {
   "lammps": {
-    "command": "uvx",
+    "command": "uv",
     "args": [
+      "run",
+      "--directory", "/path/to/lammps",
       "mcp-server-lammps",
       "--lammps-binary", "/path/to/lmp",
       "--working-directory", "/path/to/simulations"
@@ -84,8 +129,10 @@ On Windows, ensure you escape backslashes in paths correctly (use double backsla
 ```json
 "mcpServers": {
   "lammps": {
-    "command": "uvx",
+    "command": "uv",
     "args": [
+      "run",
+      "--directory", "D:\\DEV\\repos\\lammps",
       "mcp-server-lammps",
       "--lammps-binary", "C:\\Program Files\\LAMMPS\\bin\\lmp.exe",
       "--working-directory", "D:\\Simulations\\WorkDir"
