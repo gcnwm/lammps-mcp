@@ -12,3 +12,5 @@ wheels/
 .venv
 .ruff_cache
 uv.lock
+
+temp/

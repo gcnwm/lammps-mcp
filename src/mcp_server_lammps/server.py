@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import (
@@ -12,7 +12,6 @@ from enum import Enum
 from pydantic import BaseModel, Field
 import re
 from datetime import datetime
-import secrets
 
 logger = logging.getLogger(__name__)
 
@@ -215,13 +214,13 @@ def parse_thermo_from_log(log_path: Path, extract_performance: bool) -> str:
         return f"Error parsing log: {str(e)}"
 
 
-async def serve(
-    lammps_binary: str,
-    working_directory: Path,
-    remote: bool = False,
-    host: str = "0.0.0.0",
-    port: int = 8000,
-) -> None:
+def create_server(lammps_binary: str, working_directory: Path) -> Server:
+    """Create and configure the MCP LAMMPS server with all tool handlers.
+
+    This is the single source of truth for tool registration.  Both stdio
+    and HTTP transports call this function so the handler logic is never
+    duplicated.
+    """
     server = Server("mcp-lammps")
     working_directory = working_directory.expanduser().resolve()
     working_directory.mkdir(parents=True, exist_ok=True)
@@ -417,67 +416,171 @@ async def serve(
             case _:
                 raise ValueError(f"Unknown tool: {name}")
 
+    return server
+
+
+# ---------------------------------------------------------------------------
+# Transport entry-points
+# ---------------------------------------------------------------------------
+
+
+async def serve_stdio(lammps_binary: str, working_directory: Path) -> None:
+    """Run the MCP server over stdio (default mode for local clients)."""
+    server = create_server(lammps_binary, working_directory)
     options = server.create_initialization_options()
-    if remote:
-        from mcp.server.sse import SseServerTransport
-        from starlette.applications import Starlette
-        from starlette.requests import Request
-        from starlette.middleware.cors import CORSMiddleware
-        from starlette.responses import JSONResponse
-        from starlette.routing import Route
-        import uvicorn
+    async with stdio_server() as (r, w):
+        await server.run(r, w, options, raise_exceptions=True)
 
-        token = secrets.token_urlsafe(16)
-        sse = SseServerTransport("/messages")
 
-        class SseEndpoint:
+async def serve_http(
+    lammps_binary: str,
+    working_directory: Path,
+    *,
+    host: str = "0.0.0.0",
+    port: int = 8000,
+    skip_auth: bool = False,
+    allowed_ips: Sequence[str] | None = None,
+) -> None:
+    """Run the MCP server over StreamableHTTP with optional auth.
+
+    Auth modes (mutually-exclusive precedence):
+      1. ``--skip-auth``  → no authentication at all
+      2. ``--allowed-ips`` without Bearer → IPs in the allowlist pass through;
+         others must present a valid Bearer token
+      3. Default → Bearer token required for every request
+    """
+    import sys
+    import uvicorn
+    from starlette.applications import Starlette
+    from starlette.middleware.cors import CORSMiddleware
+    from starlette.routing import Route
+
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    from mcp.server.auth.middleware.bearer_auth import (
+        BearerAuthBackend,
+        RequireAuthMiddleware,
+    )
+    from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
+    from mcp.server.auth.routes import (
+        build_resource_metadata_url,
+        create_protected_resource_routes,
+    )
+    from starlette.middleware.authentication import AuthenticationMiddleware
+    from pydantic import AnyHttpUrl
+
+    from .auth import (
+        StaticTokenVerifier,
+        CombinedAuthMiddleware,
+        parse_ip_allowlist,
+    )
+
+    server = create_server(lammps_binary, working_directory)
+    session_manager = StreamableHTTPSessionManager(app=server)
+
+    # ---- Auth setup --------------------------------------------------------
+    base_url = f"http://{host}:{port}"
+    resource_server_url = AnyHttpUrl(base_url)
+    resource_metadata_url = build_resource_metadata_url(resource_server_url)
+
+    ip_allowlist = parse_ip_allowlist(allowed_ips) if allowed_ips else None
+    token_verifier: StaticTokenVerifier | None = None
+
+    routes: list[Route] = []
+    auth_middleware_stack: list[tuple] = []
+
+    if skip_auth:
+        # ── Mode 1: no auth at all ──────────────────────────────────────
+        logger.info("Auth DISABLED (--skip-auth)")
+
+        # Wrap in a class so Starlette treats it as a raw ASGI app
+        # (bound methods are seen as request-response handlers → GET only).
+        class _NoAuth:
             async def __call__(self, scope, receive, send):
-                request = Request(scope, receive)
-                if request.method == "OPTIONS":
-                    await JSONResponse({}, status_code=200)(scope, receive, send)
-                    return
-                if request.query_params.get("token") != token:
-                    await JSONResponse(
-                        {"error": "Unauthorized"}, status_code=401
-                    )(scope, receive, send)
-                    return
+                await session_manager.handle_request(scope, receive, send)
 
-                async with sse.connect_sse(scope, receive, send) as (
-                    read_stream,
-                    write_stream,
-                ):
-                    await server.run(
-                        read_stream, write_stream, options, raise_exceptions=True
-                    )
-
-        class MessagesEndpoint:
-            async def __call__(self, scope, receive, send):
-                request = Request(scope, receive)
-                if request.method == "OPTIONS":
-                    await JSONResponse({}, status_code=200)(scope, receive, send)
-                    return
-                await sse.handle_post_message(scope, receive, send)
-
-        app = Starlette(
-            debug=True,
-            routes=[
-                Route("/sse", endpoint=SseEndpoint(), methods=["GET", "OPTIONS"]),
-                Route(
-                    "/messages",
-                    endpoint=MessagesEndpoint(),
-                    methods=["POST", "OPTIONS"],
-                ),
-            ],
+        routes.append(
+            Route("/mcp", endpoint=_NoAuth()),
         )
-        app = CORSMiddleware(
-            app=app,
-            allow_origins=["*"],
-            allow_methods=["GET", "POST", "OPTIONS"],
-            allow_headers=["*"],
-        )
-        print(f"SSE URL: http://{host}:{port}/sse?token={token}")
-        config = uvicorn.Config(app, host=host, port=port, log_level="info")
-        await uvicorn.Server(config).serve()
     else:
-        async with stdio_server() as (r, w):
-            await server.run(r, w, options, raise_exceptions=True)
+        # Generate a static Bearer token
+        token_verifier = StaticTokenVerifier()
+
+        # SDK-level middleware: parses Authorization header → scope["user"]
+        auth_middleware_stack = [
+            (AuthenticationMiddleware, {"backend": BearerAuthBackend(token_verifier)}),
+            (AuthContextMiddleware, {}),
+        ]
+
+        if ip_allowlist:
+            # ── Mode 2: IP allowlist + Bearer fallback ──────────────────
+            logger.info(
+                "Auth: IP allowlist active (%d networks); "
+                "non-listed IPs require Bearer token",
+                len(ip_allowlist),
+            )
+            # Wrap the handler with our CombinedAuthMiddleware so that
+            # whitelisted IPs bypass the SDK's RequireAuthMiddleware.
+            combined = CombinedAuthMiddleware(
+                app=session_manager.handle_request,
+                token_verifier=token_verifier,
+                ip_allowlist=ip_allowlist,
+                resource_metadata_url=str(resource_metadata_url),
+                required_scopes=["mcp:full"],
+            )
+            routes.append(Route("/mcp", endpoint=combined))
+        else:
+            # ── Mode 3: Bearer token required for everyone ──────────────
+            logger.info("Auth: Bearer token required")
+            routes.append(
+                Route(
+                    "/mcp",
+                    endpoint=RequireAuthMiddleware(
+                        session_manager.handle_request,
+                        required_scopes=["mcp:full"],
+                        resource_metadata_url=resource_metadata_url,
+                    ),
+                ),
+            )
+
+        # RFC 9728 Protected Resource Metadata endpoint
+        routes.extend(
+            create_protected_resource_routes(
+                resource_url=resource_server_url,
+                authorization_servers=[resource_server_url],  # self-issued
+                scopes_supported=["mcp:full"],
+            )
+        )
+
+    app = Starlette(
+        debug=False,
+        routes=routes,
+        middleware=[],
+        lifespan=lambda _app: session_manager.run(),
+    )
+
+    # Apply auth middleware as direct ASGI wrapping (avoids Middleware() type issues)
+    for mw_cls, mw_kwargs in reversed(auth_middleware_stack):
+        app = mw_cls(app, **mw_kwargs)
+    app = CORSMiddleware(
+        app=app,
+        allow_origins=["*"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
+
+    # Print connection info to stderr so operators can see it
+    if token_verifier and not skip_auth:
+        print(
+            f"MCP StreamableHTTP server listening on {base_url}/mcp\n"
+            f"Bearer token: {token_verifier.token}\n"
+            f"Protected Resource Metadata: {resource_metadata_url}",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"MCP StreamableHTTP server listening on {base_url}/mcp (NO AUTH)",
+            file=sys.stderr,
+        )
+
+    config = uvicorn.Config(app, host=host, port=port, log_level="info")
+    await uvicorn.Server(config).serve()

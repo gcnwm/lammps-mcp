@@ -1,18 +1,14 @@
 import pytest
 import anyio
-import shutil
 from pathlib import Path
-from unittest.mock import AsyncMock, patch, MagicMock
 
 from mcp.client.session import ClientSession
-from mcp.types import CallToolResult, TextContent
 
 from mcp_server_lammps.server import (
-    LammpsTools,
     parse_thermo_from_log,
     validate_path,
     find_latest_archive,
-    serve,
+    create_server,
 )
 
 # ---------------------------------------------------------------------------
@@ -84,162 +80,11 @@ def archive_dir(work_dir):
 
 async def _create_server_client(work_dir: Path, lammps_binary: str = "lmp"):
     """
-    Spin up the MCP server and a connected client session using in-memory
-    anyio streams.  Returns (server_task_status, client_session).
+    Create an MCP server instance using the same create_server() factory
+    that the production code uses.  Returns the low-level Server object
+    ready for in-memory stream testing.
     """
-    from mcp.server.lowlevel import Server
-
-    server = Server("mcp-lammps")
-    work_dir = work_dir.resolve()
-    work_dir.mkdir(parents=True, exist_ok=True)
-
-    # Register handlers the same way serve() does
-    @server.list_tools()
-    async def list_tools():
-        from mcp.types import Tool
-        from mcp_server_lammps.server import (
-            LammpsSubmitScript,
-            LammpsReadLog,
-            LammpsReadOutput,
-            LammpsRestart,
-        )
-
-        return [
-            Tool(
-                name=LammpsTools.SUBMIT_SCRIPT,
-                description="Submit a LAMMPS input script for automated execution.",
-                inputSchema=LammpsSubmitScript.model_json_schema(),
-            ),
-            Tool(
-                name=LammpsTools.READ_LOG,
-                description="Extract thermodynamic and performance data from a log file.",
-                inputSchema=LammpsReadLog.model_json_schema(),
-            ),
-            Tool(
-                name=LammpsTools.READ_OUTPUT,
-                description="Read the content of an output file (data, dump, custom).",
-                inputSchema=LammpsReadOutput.model_json_schema(),
-            ),
-            Tool(
-                name=LammpsTools.RESTART,
-                description="Manage binary restart files (convert to data/dump or get info).",
-                inputSchema=LammpsRestart.model_json_schema(),
-            ),
-        ]
-
-    @server.call_tool()
-    async def call_tool(name, arguments):
-        from mcp_server_lammps.server import (
-            LammpsSubmitScript,
-            LammpsReadLog,
-            LammpsReadOutput,
-            LammpsRestart,
-            run_optimized_lammps,
-            CallToolResult,
-        )
-
-        match name:
-            case LammpsTools.SUBMIT_SCRIPT:
-                args = LammpsSubmitScript(**arguments)
-                try:
-                    res = await run_optimized_lammps(
-                        lammps_binary,
-                        work_dir,
-                        args.script_content,
-                        args.script_name,
-                        args.log_file,
-                    )
-                except RuntimeError as e:
-                    return CallToolResult(
-                        content=[TextContent(type="text", text=str(e))],
-                        isError=True,
-                    )
-                return [TextContent(type="text", text=res)]
-
-            case LammpsTools.READ_LOG:
-                args = LammpsReadLog(**arguments)
-                path = validate_path(args.log_file, work_dir)
-                if not path.exists():
-                    latest = find_latest_archive(work_dir)
-                    if latest and (latest / args.log_file).exists():
-                        path = latest / args.log_file
-                res = parse_thermo_from_log(path, args.extract_performance)
-                return [TextContent(type="text", text=res)]
-
-            case LammpsTools.READ_OUTPUT:
-                args = LammpsReadOutput(**arguments)
-                path = validate_path(args.filepath, work_dir)
-                if not path.exists():
-                    latest = find_latest_archive(work_dir)
-                    if latest and (latest / args.filepath).exists():
-                        path = latest / args.filepath
-                if not path.exists():
-                    return CallToolResult(
-                        content=[
-                            TextContent(
-                                type="text",
-                                text=f"File {args.filepath} not found.",
-                            )
-                        ],
-                        isError=True,
-                    )
-                with open(path, "r") as f:
-                    return [
-                        TextContent(
-                            type="text",
-                            text=f.read(10000)
-                            + (
-                                "\n...(truncated)"
-                                if path.stat().st_size > 10000
-                                else ""
-                            ),
-                        )
-                    ]
-
-            case LammpsTools.RESTART:
-                args = LammpsRestart(**arguments)
-                path = validate_path(args.restart_file, work_dir)
-                if args.action == "data" and not args.output_file:
-                    return CallToolResult(
-                        content=[
-                            TextContent(
-                                type="text",
-                                text="output_file is required for 'data' action.",
-                            )
-                        ],
-                        isError=True,
-                    )
-                if args.action == "dump" and not args.output_file:
-                    return CallToolResult(
-                        content=[
-                            TextContent(
-                                type="text",
-                                text="output_file is required for 'dump' action.",
-                            )
-                        ],
-                        isError=True,
-                    )
-                if args.action not in ("data", "info", "dump"):
-                    return CallToolResult(
-                        content=[
-                            TextContent(
-                                type="text",
-                                text=f"Unknown action: {args.action}. Use 'data', 'info', or 'dump'.",
-                            )
-                        ],
-                        isError=True,
-                    )
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"Action '{args.action}' completed (mock).",
-                    )
-                ]
-
-            case _:
-                raise ValueError(f"Unknown tool: {name}")
-
-    return server
+    return create_server(lammps_binary, work_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -947,3 +792,422 @@ def test_parse_real_log():
     # The real log has multiple runs (temperature steps)
     assert "Run 1:" in result
     assert "Run 2:" in result
+
+
+# ---------------------------------------------------------------------------
+# Tests: create_server factory
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_create_server_returns_functional_server(work_dir, log_file):
+    """create_server() should produce a server with all tools registered."""
+    server = create_server("lmp", work_dir)
+    assert server is not None
+
+    server_to_client_send, server_to_client_receive = anyio.create_memory_object_stream(
+        10
+    )
+    client_to_server_send, client_to_server_receive = anyio.create_memory_object_stream(
+        10
+    )
+
+    result_tools = None
+
+    async def run_server():
+        await server.run(
+            client_to_server_receive,
+            server_to_client_send,
+            server.create_initialization_options(),
+        )
+
+    async def run_client():
+        nonlocal result_tools
+        async with ClientSession(
+            server_to_client_receive, client_to_server_send
+        ) as session:
+            await session.initialize()
+            result_tools = await session.list_tools()
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(run_server)
+        tg.start_soon(run_client)
+        await anyio.sleep(0.5)
+        tg.cancel_scope.cancel()
+
+    assert result_tools is not None
+    tool_names = {t.name for t in result_tools.tools}
+    assert tool_names == {"submit_script", "read_log", "read_output", "restart"}
+
+
+# ---------------------------------------------------------------------------
+# Tests: auth module
+# ---------------------------------------------------------------------------
+
+
+class TestStaticTokenVerifier:
+    @pytest.mark.anyio
+    async def test_valid_token(self):
+        from mcp_server_lammps.auth import StaticTokenVerifier
+
+        verifier = StaticTokenVerifier(token="test-token-123")
+        result = await verifier.verify_token("test-token-123")
+        assert result is not None
+        assert result.token == "test-token-123"
+        assert result.client_id == "static"
+        assert "mcp:full" in result.scopes
+
+    @pytest.mark.anyio
+    async def test_invalid_token(self):
+        from mcp_server_lammps.auth import StaticTokenVerifier
+
+        verifier = StaticTokenVerifier(token="correct-token")
+        result = await verifier.verify_token("wrong-token")
+        assert result is None
+
+    @pytest.mark.anyio
+    async def test_revoked_token(self):
+        from mcp_server_lammps.auth import StaticTokenVerifier
+
+        verifier = StaticTokenVerifier(token="my-token")
+        verifier.revoke()
+        result = await verifier.verify_token("my-token")
+        assert result is None
+
+    @pytest.mark.anyio
+    async def test_expired_token(self):
+        from mcp_server_lammps.auth import StaticTokenVerifier
+
+        verifier = StaticTokenVerifier(token="my-token", expires_in=-1)
+        result = await verifier.verify_token("my-token")
+        assert result is None
+
+    @pytest.mark.anyio
+    async def test_auto_generated_token(self):
+        from mcp_server_lammps.auth import StaticTokenVerifier
+
+        verifier = StaticTokenVerifier()
+        assert verifier.token  # Should be non-empty
+        assert len(verifier.token) > 16  # urlsafe(32) produces ~43 chars
+        result = await verifier.verify_token(verifier.token)
+        assert result is not None
+
+
+class TestIPAllowlist:
+    def test_parse_valid_cidr(self):
+        from mcp_server_lammps.auth import parse_ip_allowlist
+
+        nets = parse_ip_allowlist(["192.168.0.0/16", "10.0.0.0/8"])
+        # 2 user entries + 2 implicit loopback entries
+        assert len(nets) >= 4
+
+    def test_parse_single_ip(self):
+        from mcp_server_lammps.auth import parse_ip_allowlist
+
+        nets = parse_ip_allowlist(["192.168.1.100"])
+        # single IP becomes /32 + loopback entries
+        assert len(nets) >= 3
+
+    def test_parse_invalid_raises(self):
+        from mcp_server_lammps.auth import parse_ip_allowlist
+
+        with pytest.raises(ValueError, match="Invalid IP/CIDR"):
+            parse_ip_allowlist(["not-an-ip"])
+
+    def test_parse_empty_entries_ignored(self):
+        from mcp_server_lammps.auth import parse_ip_allowlist
+
+        nets = parse_ip_allowlist(["", "  ", "10.0.0.0/8"])
+        # 1 user entry + 2 loopback
+        assert len(nets) == 3
+
+    def test_ip_in_allowlist(self):
+        from mcp_server_lammps.auth import parse_ip_allowlist, ip_in_allowlist
+
+        nets = parse_ip_allowlist(["192.168.0.0/16"])
+        assert ip_in_allowlist("192.168.1.100", nets) is True
+        assert ip_in_allowlist("192.168.255.1", nets) is True
+        assert ip_in_allowlist("10.0.0.1", nets) is False
+        # Loopback always included
+        assert ip_in_allowlist("127.0.0.1", nets) is True
+
+    def test_ip_not_in_allowlist(self):
+        from mcp_server_lammps.auth import parse_ip_allowlist, ip_in_allowlist
+
+        nets = parse_ip_allowlist(["10.0.0.0/8"])
+        assert ip_in_allowlist("172.16.0.1", nets) is False
+        assert ip_in_allowlist("8.8.8.8", nets) is False
+
+    def test_ipv6(self):
+        from mcp_server_lammps.auth import parse_ip_allowlist, ip_in_allowlist
+
+        nets = parse_ip_allowlist(["fd00::/8"])
+        assert ip_in_allowlist("fd00::1", nets) is True
+        assert ip_in_allowlist("::1", nets) is True  # loopback always
+        assert ip_in_allowlist("2001:db8::1", nets) is False
+
+
+class TestCombinedAuthMiddleware:
+    """Unit tests for CombinedAuthMiddleware ASGI behavior."""
+
+    @pytest.mark.anyio
+    async def test_whitelisted_ip_passes(self):
+        from mcp_server_lammps.auth import (
+            CombinedAuthMiddleware,
+            StaticTokenVerifier,
+            parse_ip_allowlist,
+        )
+
+        called = False
+
+        async def inner_app(scope, receive, send):
+            nonlocal called
+            called = True
+
+        verifier = StaticTokenVerifier(token="tok")
+        nets = parse_ip_allowlist(["192.168.0.0/16"])
+        mw = CombinedAuthMiddleware(
+            app=inner_app,
+            token_verifier=verifier,
+            ip_allowlist=nets,
+        )
+
+        scope = {
+            "type": "http",
+            "client": ("192.168.1.50", 12345),
+            "headers": [],
+        }
+        await mw(scope, None, None)
+        assert called is True
+
+    @pytest.mark.anyio
+    async def test_non_listed_ip_without_token_gets_401(self):
+        from mcp_server_lammps.auth import (
+            CombinedAuthMiddleware,
+            StaticTokenVerifier,
+            parse_ip_allowlist,
+        )
+
+        responses = []
+
+        async def mock_send(message):
+            responses.append(message)
+
+        async def inner_app(scope, receive, send):
+            pass  # Should not be reached
+
+        verifier = StaticTokenVerifier(token="secret")
+        nets = parse_ip_allowlist(["10.0.0.0/8"])
+        mw = CombinedAuthMiddleware(
+            app=inner_app,
+            token_verifier=verifier,
+            ip_allowlist=nets,
+        )
+
+        scope = {
+            "type": "http",
+            "client": ("8.8.8.8", 12345),
+            "headers": [],
+        }
+        await mw(scope, None, mock_send)
+        assert any(r.get("status") == 401 for r in responses)
+
+    @pytest.mark.anyio
+    async def test_valid_bearer_passes(self):
+        from mcp_server_lammps.auth import CombinedAuthMiddleware, StaticTokenVerifier
+
+        called = False
+
+        async def inner_app(scope, receive, send):
+            nonlocal called
+            called = True
+
+        verifier = StaticTokenVerifier(token="good-token")
+        mw = CombinedAuthMiddleware(
+            app=inner_app,
+            token_verifier=verifier,
+        )
+
+        scope = {
+            "type": "http",
+            "client": ("8.8.8.8", 12345),
+            "headers": [(b"authorization", b"Bearer good-token")],
+        }
+        await mw(scope, None, None)
+        assert called is True
+
+    @pytest.mark.anyio
+    async def test_invalid_bearer_gets_401(self):
+        from mcp_server_lammps.auth import CombinedAuthMiddleware, StaticTokenVerifier
+
+        responses = []
+
+        async def mock_send(message):
+            responses.append(message)
+
+        async def inner_app(scope, receive, send):
+            pass
+
+        verifier = StaticTokenVerifier(token="real-token")
+        mw = CombinedAuthMiddleware(
+            app=inner_app,
+            token_verifier=verifier,
+        )
+
+        scope = {
+            "type": "http",
+            "client": ("8.8.8.8", 12345),
+            "headers": [(b"authorization", b"Bearer wrong-token")],
+        }
+        await mw(scope, None, mock_send)
+        assert any(r.get("status") == 401 for r in responses)
+
+    @pytest.mark.anyio
+    async def test_non_http_passes_through(self):
+        from mcp_server_lammps.auth import CombinedAuthMiddleware, StaticTokenVerifier
+
+        called = False
+
+        async def inner_app(scope, receive, send):
+            nonlocal called
+            called = True
+
+        verifier = StaticTokenVerifier(token="tok")
+        mw = CombinedAuthMiddleware(app=inner_app, token_verifier=verifier)
+        scope = {"type": "lifespan"}
+        await mw(scope, None, None)
+        assert called is True
+
+
+# ---------------------------------------------------------------------------
+# Tests: websocket scope rejection (auth middleware)
+# ---------------------------------------------------------------------------
+
+
+class TestWebSocketAuthRejection:
+    """Verify auth middleware sends websocket.close (not http.*) for ws scopes."""
+
+    @pytest.mark.anyio
+    async def test_combined_ws_no_token_sends_ws_close(self):
+        from mcp_server_lammps.auth import CombinedAuthMiddleware, StaticTokenVerifier
+
+        messages = []
+
+        async def mock_send(msg):
+            messages.append(msg)
+
+        async def inner_app(scope, receive, send):
+            pass  # should not be reached
+
+        verifier = StaticTokenVerifier(token="secret")
+        mw = CombinedAuthMiddleware(app=inner_app, token_verifier=verifier)
+        scope = {
+            "type": "websocket",
+            "client": ("8.8.8.8", 12345),
+            "headers": [],
+        }
+        await mw(scope, None, mock_send)
+        assert len(messages) == 1
+        assert messages[0]["type"] == "websocket.close"
+        assert messages[0]["code"] == 1008
+
+    @pytest.mark.anyio
+    async def test_combined_ws_invalid_token_sends_ws_close(self):
+        from mcp_server_lammps.auth import CombinedAuthMiddleware, StaticTokenVerifier
+
+        messages = []
+
+        async def mock_send(msg):
+            messages.append(msg)
+
+        async def inner_app(scope, receive, send):
+            pass
+
+        verifier = StaticTokenVerifier(token="real")
+        mw = CombinedAuthMiddleware(app=inner_app, token_verifier=verifier)
+        scope = {
+            "type": "websocket",
+            "client": ("8.8.8.8", 12345),
+            "headers": [(b"authorization", b"Bearer wrong")],
+        }
+        await mw(scope, None, mock_send)
+        assert len(messages) == 1
+        assert messages[0]["type"] == "websocket.close"
+        assert messages[0]["code"] == 1008
+
+    @pytest.mark.anyio
+    async def test_combined_ws_whitelisted_ip_passes(self):
+        from mcp_server_lammps.auth import (
+            CombinedAuthMiddleware,
+            StaticTokenVerifier,
+            parse_ip_allowlist,
+        )
+
+        called = False
+
+        async def inner_app(scope, receive, send):
+            nonlocal called
+            called = True
+
+        verifier = StaticTokenVerifier(token="tok")
+        nets = parse_ip_allowlist(["192.168.0.0/16"])
+        mw = CombinedAuthMiddleware(
+            app=inner_app,
+            token_verifier=verifier,
+            ip_allowlist=nets,
+        )
+        scope = {
+            "type": "websocket",
+            "client": ("192.168.1.50", 12345),
+            "headers": [],
+        }
+        await mw(scope, None, None)
+        assert called is True
+
+    @pytest.mark.anyio
+    async def test_ip_allowlist_ws_rejected_sends_ws_close(self):
+        from mcp_server_lammps.auth import IPAllowlistMiddleware, parse_ip_allowlist
+
+        messages = []
+
+        async def mock_send(msg):
+            messages.append(msg)
+
+        async def inner_app(scope, receive, send):
+            pass  # should not be reached
+
+        nets = parse_ip_allowlist(["10.0.0.0/8"])
+        mw = IPAllowlistMiddleware(app=inner_app, allowlist=nets)
+        scope = {
+            "type": "websocket",
+            "client": ("8.8.8.8", 12345),
+            "headers": [],
+        }
+        await mw(scope, None, mock_send)
+        assert len(messages) == 1
+        assert messages[0]["type"] == "websocket.close"
+        assert messages[0]["code"] == 1008
+
+    @pytest.mark.anyio
+    async def test_http_still_gets_http_response(self):
+        """Ensure HTTP scopes still get proper http.response.* messages."""
+        from mcp_server_lammps.auth import CombinedAuthMiddleware, StaticTokenVerifier
+
+        messages = []
+
+        async def mock_send(msg):
+            messages.append(msg)
+
+        async def inner_app(scope, receive, send):
+            pass
+
+        verifier = StaticTokenVerifier(token="secret")
+        mw = CombinedAuthMiddleware(app=inner_app, token_verifier=verifier)
+        scope = {
+            "type": "http",
+            "client": ("8.8.8.8", 12345),
+            "headers": [],
+        }
+        await mw(scope, None, mock_send)
+        assert any(r.get("type") == "http.response.start" for r in messages)
+        assert any(r.get("status") == 401 for r in messages)
