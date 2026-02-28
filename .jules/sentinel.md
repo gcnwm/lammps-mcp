@@ -1,0 +1,4 @@
+## 2024-05-24 - [Path Traversal in MCP Tool Handler]
+**Vulnerability:** The `RESTART` tool accepted user input (`args.output_file`) and appended it directly to a system command line executed via `subprocess` without any path validation, allowing arbitrary file writes outside the intended working directory (Path Traversal).
+**Learning:** In MCP servers, every file path provided by the remote client must be rigorously validated against an allowed base directory before being used in file system operations or shell commands. Even if one argument (`args.restart_file`) is validated, all path arguments must be individually validated.
+**Prevention:** Always use the `validate_path(path_str, working_dir)` helper for every path parameter in an MCP tool input schema. Wrap these validations in `try/except ValueError` to return a controlled `CallToolResult` instead of crashing the server request.

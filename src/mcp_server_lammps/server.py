@@ -274,7 +274,15 @@ def create_server(lammps_binary: str, working_directory: Path) -> Server:
 
             case LammpsTools.READ_LOG:
                 args = LammpsReadLog(**arguments)
-                path = validate_path(args.log_file, working_directory)
+
+                try:
+                    path = validate_path(args.log_file, working_directory)
+                except ValueError as e:
+                    return CallToolResult(
+                        content=[TextContent(type="text", text=str(e))],
+                        isError=True,
+                    )
+
                 if not path.exists():
                     latest_run = find_latest_run_directory(working_directory)
                     if latest_run:
@@ -294,7 +302,15 @@ def create_server(lammps_binary: str, working_directory: Path) -> Server:
 
             case LammpsTools.READ_OUTPUT:
                 args = LammpsReadOutput(**arguments)
-                path = validate_path(args.filepath, working_directory)
+
+                try:
+                    path = validate_path(args.filepath, working_directory)
+                except ValueError as e:
+                    return CallToolResult(
+                        content=[TextContent(type="text", text=str(e))],
+                        isError=True,
+                    )
+
                 if not path.exists():
                     latest_run = find_latest_run_directory(working_directory)
                     if latest_run:
@@ -334,7 +350,16 @@ def create_server(lammps_binary: str, working_directory: Path) -> Server:
 
             case LammpsTools.RESTART:
                 args = LammpsRestart(**arguments)
-                path = validate_path(args.restart_file, working_directory)
+
+                # Security: Prevent path traversal by validating input/output files
+                try:
+                    path = validate_path(args.restart_file, working_directory)
+                except ValueError as e:
+                    return CallToolResult(
+                        content=[TextContent(type="text", text=str(e))],
+                        isError=True,
+                    )
+
                 cmd = [lammps_binary]
                 if args.action == "data":
                     if not args.output_file:
@@ -347,7 +372,16 @@ def create_server(lammps_binary: str, working_directory: Path) -> Server:
                             ],
                             isError=True,
                         )
-                    cmd.extend(["-restart2data", str(path), args.output_file])
+
+                    try:
+                        out_path = validate_path(args.output_file, working_directory)
+                    except ValueError as e:
+                        return CallToolResult(
+                            content=[TextContent(type="text", text=str(e))],
+                            isError=True,
+                        )
+
+                    cmd.extend(["-restart2data", str(path), str(out_path)])
                 elif args.action == "info":
                     cmd.extend(["-restart2info", str(path)])
                 elif args.action == "dump":
@@ -361,8 +395,17 @@ def create_server(lammps_binary: str, working_directory: Path) -> Server:
                             ],
                             isError=True,
                         )
+
+                    try:
+                        out_path = validate_path(args.output_file, working_directory)
+                    except ValueError as e:
+                        return CallToolResult(
+                            content=[TextContent(type="text", text=str(e))],
+                            isError=True,
+                        )
+
                     cmd.extend(
-                        ["-restart2dump", str(path), "all", "atom", args.output_file]
+                        ["-restart2dump", str(path), "all", "atom", str(out_path)]
                     )
                 else:
                     return CallToolResult(
