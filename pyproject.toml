@@ -1,6 +1,6 @@
 [project]
 name = "mcp-server-lammps"
-version = "0.0.2"
+version = "0.1.0"
 description = "A Model Context Protocol server for LAMMPS molecular dynamics simulator"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,6 +17,8 @@ dependencies = [
     "click>=8.1.7",
     "mcp>=1.0.0",
     "pydantic>=2.0.0",
+    "starlette>=0.35.0",
+    "uvicorn>=0.27.0",
 ]
 
 [project.scripts]
@@ -27,4 +29,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
-dev = ["pyright>=1.1.407", "pytest>=8.0.0"]
+dev = [
+    "anyio>=4.12.1",
+    "pyright>=1.1.407",
+    "pytest>=8.0.0",
+    "pytest-anyio>=0.0.0",
+]

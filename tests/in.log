@@ -1,0 +1,1131 @@
+LAMMPS (10 Sep 2025)
+OMP_NUM_THREADS environment is not set. Defaulting to 1 thread.
+  using 1 OpenMP thread(s) per MPI task
+Loaded 1 plugins from D:\Apps\LAMMPS\LAMMPS 64-bit 10Sep2025 with GUI\plugins
+# LAMMPS Input Script for Argon Melting Simulation
+# Project Objective: Simulate melting of solid Argon and identify Tm
+# Units: real (kcal/mol, Angstrom, fs)
+
+# --- 1. System Setup ---
+units           real
+atom_style      atomic
+boundary        p p p
+
+# Argon Parameters
+# Mass: 39.948 g/mol
+# Epsilon: 0.238 kcal/mol (119.8 K)
+# Sigma: 3.405 Angstroms
+variable        mass equal 39.948
+variable        epsilon equal 0.238
+variable        sigma equal 3.405
+variable        cutoff equal 2.5*${sigma}
+variable        cutoff equal 2.5*3.405
+
+# Lattice Setup
+# FCC lattice. Initial guess 5.3 A (approx for 20K).
+lattice         fcc 5.3
+Lattice spacing in x,y,z = 5.3 5.3 5.3
+region          sim_box block 0 5 0 5 0 5
+create_box      1 sim_box
+Created orthogonal box = (0 0 0) to (26.5 26.5 26.5)
+  1 by 1 by 1 MPI processor grid
+create_atoms    1 box
+Created 500 atoms
+  using lattice units in orthogonal box = (0 0 0) to (26.5 26.5 26.5)
+  create_atoms CPU = 0.000 seconds
+
+mass            1 ${mass}
+mass            1 39.948
+
+# Interaction
+pair_style      lj/cut ${cutoff}
+pair_style      lj/cut 8.5125
+pair_coeff      1 1 ${epsilon} ${sigma}
+pair_coeff      1 1 0.238 ${sigma}
+pair_coeff      1 1 0.238 3.405
+
+neighbor        2.0 bin
+neigh_modify    delay 0 every 1 check yes
+
+# --- 2. Minimization & Equilibration ---
+# Minimization
+minimize        1.0e-4 1.0e-6 100 1000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Neighbor list info ...
+  update: every = 1 steps, delay = 0 steps, check = yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 10.5125
+  ghost atom cutoff = 10.5125
+  binsize = 5.25625, bins = 6 6 6
+  1 neighbor lists, perpetual/occasional/extra = 1 0 0
+  (1) pair lj/cut, perpetual
+      attributes: half, newton on
+      pair build: half/bin/atomonly/newton
+      stencil: half/bin/3d
+      bin: standard
+Per MPI rank memory allocation (min/avg/max) = 4.269 | 4.269 | 4.269 Mbytes
+   Step          Temp          E_pair         E_mol          TotEng         Press     
+         0   0             -963.182        0             -963.182       -365.4179     
+         1   0             -963.182        0             -963.182       -365.4179     
+Loop time of 0.000455 on 1 procs for 1 steps with 500 atoms
+
+0.0% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+Minimization stats:
+  Stopping criterion = energy tolerance
+  Energy initial, next-to-last, final = 
+     -963.182001086524  -963.182001086524  -963.182001086524
+  Force two-norm initial, final = 2.7819333e-13 1.6815673e-13
+  Force max component initial, final = 1.2507356e-14 1.2178626e-14
+  Final line search alpha, max atom move = 1 1.2178626e-14
+  Iterations, force evaluations = 1 2
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0.000431   | 0.000431   | 0.000431   |   0.0 | 94.73
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 8e-06      | 8e-06      | 8e-06      |   0.0 |  1.76
+Output  | 0          | 0          | 0          |   0.0 |  0.00
+Modify  | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 1.6e-05    |            |       |  3.52
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           1956 ave        1956 max        1956 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33500 ave       33500 max       33500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33500
+Ave neighs/atom = 67
+Neighbor list builds = 0
+Dangerous builds = 0
+# Equilibration at 20 K (NPT to relax box)
+velocity        all create 20.0 12345 dist gaussian
+fix             1 all npt temp 20.0 20.0 100.0 iso 1.0 1.0 1000.0
+thermo          100
+thermo_style    custom step temp press pe vol density
+run             5000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 3.144 | 3.144 | 3.144 Mbytes
+   Step          Temp          Press          PotEng         Volume        Density    
+         1   20            -292.34437     -963.182        18609.625      1.7822823    
+       100   10.222941      371.14058     -946.79109      18364.348      1.8060867    
+       200   5.4108072     -353.9289      -930.9109       19002.01       1.7454788    
+       300   12.897413      299.4867      -940.83162      18466.625      1.7960837    
+       400   15.217487     -179.09029     -934.24694      18865.964      1.7580657    
+       500   18.879868      121.37061     -933.51251      18689.491      1.774666     
+       600   20.184762     -53.876368     -928.25583      18866.989      1.7579702    
+       700   17.020707      20.14641      -918.27321      18939.05       1.7512813    
+       800   23.081172     -35.109864     -920.95611      18954.025      1.7498977    
+       900   21.542053      36.733436     -921.46885      18894.288      1.7554303    
+      1000   18.349342     -43.058683     -920.58859      18952.947      1.7499973    
+      1100   21.540727      21.107518     -927.49822      18829.503      1.76147      
+      1200   19.592625      9.86418       -928.45848      18821.506      1.7622184    
+      1300   18.723948     -32.458004     -929.13492      18840.384      1.7604527    
+      1400   20.096255      55.929719     -930.7725       18765.097      1.7675157    
+      1500   19.382878     -54.135989     -926.91264      18884.68       1.7563233    
+      1600   21.286448      46.197542     -927.86         18813.048      1.7630107    
+      1700   20.483816     -34.303704     -926.42153      18877.018      1.7570362    
+      1800   18.150417      29.616139     -924.6787       18850.671      1.759492     
+      1900   20.436311     -25.222552     -925.36999      18883.323      1.7564496    
+      2000   20.412319      33.867213     -923.78799      18869.211      1.7577632    
+      2100   21.296916     -54.095769     -924.90413      18919.206      1.7531182    
+      2200   21.341967      65.208109     -929.86843      18777.081      1.7663877    
+      2300   17.737003     -50.598416     -927.13789      18876.464      1.7570878    
+      2400   18.808021      49.155603     -926.68413      18814.797      1.7628468    
+      2500   20.432707     -40.301013     -924.65811      18903.408      1.7545833    
+      2600   20.32699       39.454962     -922.80025      18877.44       1.756997     
+      2700   21.277399     -50.880747     -923.5113       18930.959      1.7520298    
+      2800   20.303851      55.621806     -925.59906      18829.872      1.7614355    
+      2900   19.467071     -54.357881     -926.41663      18892.336      1.7556116    
+      3000   20.592404      52.044815     -930.32967      18779.02       1.7662053    
+      3100   19.105235     -33.658419     -929.49907      18840.902      1.7604043    
+      3200   19.058539      28.491872     -929.49703      18799.196      1.7643097    
+      3300   19.629353     -10.025406     -927.30865      18852.793      1.7592939    
+      3400   19.844776     -2.7056344     -925.16832      18877.116      1.7570271    
+      3500   21.133374      5.8859303     -926.05133      18861.755      1.758458     
+      3600   19.375279     -4.4930643     -924.74889      18878.847      1.756866     
+      3700   19.387471      4.5375903     -925.02385      18869.009      1.757782     
+      3800   21.586581     -1.5578268     -926.28615      18862.091      1.7584267    
+      3900   20.851904      10.206734     -924.3963       18876.546      1.7570802    
+      4000   19.600301     -24.507141     -924.71838      18889.852      1.7558425    
+      4100   19.668291      39.037881    --926.719        18823.613      1.7620212    
+      4200   19.299805     -41.403125     -925.37063      18893.019      1.7555481    
+      4300   21.645894      47.645781     -927.51362      18815.442      1.7627864    
+      4400   20.006609     -43.841634     -925.50782      18897.131      1.7551661    
+      4500   19.066285      39.152943     -926.23442      18832.335      1.7612051    
+      4600   19.914461     -34.448411     -926.57554      18876.435      1.7570905    
+      4700   19.940337      37.377587     -926.76628      18828.854      1.7615307    
+      4800   20.369312     -35.109695     -926.20786      18883.11       1.7564693    
+      4900   19.642475      40.456113     -925.34398      18843.569      1.7601552    
+      5000   20.945913     -43.852952     -925.37555      18902.29       1.7546871    
+      5001   20.961452     -43.173308     -925.39629      18901.678      1.7547439    
+Loop time of 0.794699 on 1 procs for 5000 steps with 500 atoms
+
+Performance: 543.602 ns/day, 0.044 hours/ns, 6291.690 timesteps/s, 3.146 Matom-step/s
+70.8% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0.54836    | 0.54836    | 0.54836    |   0.0 | 69.00
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0.018788   | 0.018788   | 0.018788   |   0.0 |  2.36
+Output  | 0.000558   | 0.000558   | 0.000558   |   0.0 |  0.07
+Modify  | 0.21818    | 0.21818    | 0.21818    |   0.0 | 27.45
+Other   |            | 0.008816   |            |       |  1.11
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           1956 ave        1956 max        1956 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33500 ave       33500 max       33500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33500
+Ave neighs/atom = 67
+Neighbor list builds = 0
+Dangerous builds = 0uuunfix           1
+
+# --- 3. Production Runs (Heating Protocol) ---
+# We will use NVT for the heating runs as requested in the prompt methodology.
+# Note: Using NVT means the volume is fixed to the 20K equilibrated volume.
+# This mimics isochoric heating.
+
+# Output settings
+dump            1 all xyz 1000 traj.xyz
+thermo          1000
+
+# Loop over temperatures
+# 20 to 120 K, finer steps near 84 K
+variable        temps index 20 40 60 70 75 80 82 84 86 88 90 100 115 130
+
+# Compute RDF for structural analysis (defined once)
+compute         rdf all rdf 100
+
+label           loop_start
+variable        t equal ${temps}
+variable        t equal 20
+
+# Reset timestamp for cleaner logs or just continue
+# We continue to preserve state
+# NVT Simulation
+fix             1 all nvt temp $t $t 100.0
+fix             1 all nvt temp 20 $t 100.0
+fix             1 all nvt temp 20 20 100.0
+
+# Output RDF
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_$t.dat mode vector
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_20.dat mode vector
+
+# Run for 5000 steps to gather statistics
+run             5000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Neighbor list info ...
+  update: every = 1 steps, delay = 0 steps, check = yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 10.5125
+  ghost atom cutoff = 10.5125
+  binsize = 5.25625, bins = 6 6 6
+  2 neighbor lists, perpetual/occasional/extra = 1 1 0
+  (1) pair lj/cut, perpetual
+      attributes: half, newton on
+      pair build: half/bin/atomonly/newton
+      stencil: half/bin/3d
+      bin: standard
+  (2) compute rdf, occasional, copy from (1)
+      attributes: half, newton on
+      pair build: copy
+      stencil: none
+      bin: none
+Per MPI rank memory allocation (min/avg/max) = 3.144 | 3.144 | 3.144 Mbytes
+   Step          Temp          Press          PotEng         Volume        Density    
+      5001   20.961452     -43.173308     -925.39629      18901.678      1.7547439    
+      6000   20.106369     -1.5807422     -922.91297      18901.678      1.7547439    
+      7000   20.143339     -49.536399     -925.18228      18901.678      1.7547439    
+      8000   19.028868     -84.422525     -927.06576      18901.678      1.7547439    
+      9000   22.278044     -58.412827     -926.28004      18901.678      1.7547439    
+     10000   20.249816     -16.689938     -923.68512      18901.678      1.7547439    
+     10001   20.223455     -16.690294     -923.68626      18901.678      1.7547439    
+Loop time of 1.23801 on 1 procs for 5000 steps with 500 atoms
+
+Performance: 348.947 ns/day, 0.069 hours/ns, 4038.733 timesteps/s, 2.019 Matom-step/s
+94.7% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 1.1606     | 1.1606     | 1.1606     |   0.0 | 93.75
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0.021004   | 0.021004   | 0.021004   |   0.0 |  1.70
+Output  | 0.001935   | 0.001935   | 0.001935   |   0.0 |  0.16
+Modify  | 0.046953   | 0.046953   | 0.046953   |   0.0 |  3.79
+Other   |            | 0.007513   |            |       |  0.61
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2038 ave        2038 max        2038 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33722 ave       33722 max       33722 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33722
+Ave neighs/atom = 67.444
+Neighbor list builds = 0
+Dangerous builds = 0
+# Calculate average PE for this temperature
+variable        avg_pe equal pe
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_$t.dat
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_20.dat
+
+# Cleanup for next iteration
+unfix           rdf_out
+unfix           1
+unfix           pe_avg
+
+next            temps
+jump            SELF loop_start
+variable        t equal ${temps}
+variable        t equal 40
+
+# Reset timestamp for cleaner logs or just continue
+# We continue to preserve state
+# NVT Simulation
+fix             1 all nvt temp $t $t 100.0
+fix             1 all nvt temp 40 $t 100.0
+fix             1 all nvt temp 40 40 100.0
+
+# Output RDF
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_$t.dat mode vector
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_40.dat mode vector
+
+# Run for 5000 steps to gather statistics
+run             5000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 4.57 | 4.57 | 4.57 Mbytes
+   Step          Temp          Press          PotEng         Volume        Density    
+     10001   20.223455     -16.690294     -923.68626      18901.678      1.7547439    
+     11000   38.267975      545.85581     -897.2194       18901.678      1.7547439    
+     12000   38.091962      506.28641     -899.33547      18901.678      1.7547439    
+     13000   38.224225      458.77632     -901.71354      18901.678      1.7547439    
+     14000   38.123458      585.28806     -895.05294      18901.678      1.7547439    
+     15000   40.183851      532.55757     -898.57133      18901.678      1.7547439    
+     15001   40.217055      532.78407     -898.57995      18901.678      1.7547439    
+Loop time of 1.2919 on 1 procs for 5000 steps with 500 atoms
+
+Performance: 334.391 ns/day, 0.072 hours/ns, 3870.272 timesteps/s, 1.935 Matom-step/s
+87.1% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 1.2134     | 1.2134     | 1.2134     |   0.0 | 93.93
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0.021005   | 0.021005   | 0.021005   |   0.0 |  1.63
+Output  | 0.001944   | 0.001944   | 0.001944   |   0.0 |  0.15
+Modify  | 0.047982   | 0.047982   | 0.047982   |   0.0 |  3.71
+Other   |            | 0.007546   |            |       |  0.58
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2037 ave        2037 max        2037 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33750 ave       33750 max       33750 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33750
+Ave neighs/atom = 67.5
+Neighbor list builds = 0
+Dangerous builds = 0
+# Calculate average PE for this temperature
+variable        avg_pe equal pe
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_$t.dat
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_40.dat
+
+# Cleanup for next iteration
+unfix           rdf_out
+unfix           1
+unfix           pe_avg
+
+next            temps
+jump            SELF loop_start
+variable        t equal ${temps}
+variable        t equal 60
+
+# Reset timestamp for cleaner logs or just continue
+# We continue to preserve state
+# NVT Simulation
+fix             1 all nvt temp $t $t 100.0
+fix             1 all nvt temp 60 $t 100.0
+fix             1 all nvt temp 60 60 100.0
+
+# Output RDF
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_$t.dat mode vector
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_60.dat mode vector
+
+# Run for 5000 steps to gather statistics
+run             5000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 4.57 | 4.57 | 4.57 Mbytes
+   Step          Temp          Press          PotEng         Volume        Density    
+     15001   40.217055      532.78407     -898.57995      18901.678      1.7547439    
+     16000   60.622624      1126.2205     -871.1669       18901.678      1.7547439    
+     17000   55.770224      1072.5104     -872.70424      18901.678      1.7547439    
+     18000   61.790717      1183.0174     -868.73232      18901.678      1.7547439    
+     19000   59.974054      1198.8181     -867.4778       18901.678      1.7547439    
+     20000   63.066217      1251.0586     -865.24033      18901.678      1.7547439    
+     20001   63.045361      1251.4873     -865.21819      18901.678      1.7547439    
+Loop time of 1.05945 on 1 procs for 5000 steps with 500 atoms
+
+Performance: 407.757 ns/day, 0.059 hours/ns, 4719.412 timesteps/s, 2.360 Matom-step/s
+91.4% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0.97526    | 0.97526    | 0.97526    |   0.0 | 92.05
+Neigh   | 0.008773   | 0.008773   | 0.008773   |   0.0 |  0.83
+Comm    | 0.019505   | 0.019505   | 0.019505   |   0.0 |  1.84
+Output  | 0.001771   | 0.001771   | 0.001771   |   0.0 |  0.17
+Modify  | 0.040982   | 0.040982   | 0.040982   |   0.0 |  3.87
+Other   |            | 0.01317    |            |       |  1.24
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2098 ave        2098 max        2098 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33796 ave       33796 max       33796 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33796
+Ave neighs/atom = 67.592
+Neighbor list builds = 15
+Dangerous builds = 0
+# Calculate average PE for this temperature
+variable        avg_pe equal pe
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_$t.dat
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_60.dat
+
+# Cleanup for next iteration
+unfix           rdf_out
+unfix           1
+unfix           pe_avg
+
+next            temps
+jump            SELF loop_start
+variable        t equal ${temps}
+variable        t equal 70
+
+# Reset timestamp for cleaner logs or just continue
+# We continue to preserve state
+# NVT Simulation
+fix             1 all nvt temp $t $t 100.0
+fix             1 all nvt temp 70 $t 100.0
+fix             1 all nvt temp 70 70 100.0
+
+# Output RDF
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_$t.dat mode vector
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_70.dat mode vector
+
+# Run for 5000 steps to gather statistics
+run             5000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 4.571 | 4.571 | 4.571 Mbytes
+   Step          Temp          Press          PotEng         Volume        Density    
+     20001   63.045361      1251.4873     -865.21819      18901.678      1.7547439    
+     21000   71.145944      1502.0716     -853.44921      18901.678      1.7547439    
+     22000   64.241676      1353.6475     -859.78056      18901.678      1.7547439    
+     23000   71.235256      1457.7095     -855.6221       18901.678      1.7547439    
+     24000   70.520747      1522.9023     -851.87508      18901.678      1.7547439    
+     25000   70.606997      1425.8248     -857.05049      18901.678      1.7547439    
+     25001   70.62474       1426.7206     -857.01099      18901.678      1.7547439    
+Loop time of 1.32353 on 1 procs for 5000 steps with 500 atoms
+
+Performance: 326.399 ns/day, 0.074 hours/ns, 3777.765 timesteps/s, 1.889 Matom-step/s
+88.5% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 1.2041     | 1.2041     | 1.2041     |   0.0 | 90.98
+Neigh   | 0.013591   | 0.013591   | 0.013591   |   0.0 |  1.03
+Comm    | 0.023379   | 0.023379   | 0.023379   |   0.0 |  1.77
+Output  | 0.001885   | 0.001885   | 0.001885   |   0.0 |  0.14
+Modify  | 0.050397   | 0.050397   | 0.050397   |   0.0 |  3.81
+Other   |            | 0.03017    |            |       |  2.28
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2197 ave        2197 max        2197 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33693 ave       33693 max       33693 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33693
+Ave neighs/atom = 67.386
+Neighbor list builds = 18
+Dangerous builds = 0
+
+# Calculate average PE for this temperature
+variable        avg_pe equal pe
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_$t.dat
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_70.dat
+
+# Cleanup for next iteration
+unfix           rdf_out
+unfix           1
+unfix           pe_avg
+
+next            temps
+jump            SELF loop_start
+variable        t equal ${temps}
+variable        t equal 75
+
+# Reset timestamp for cleaner logs or just continue
+# We continue to preserve state
+# NVT Simulation
+fix             1 all nvt temp $t $t 100.0
+fix             1 all nvt temp 75 $t 100.0
+fix             1 all nvt temp 75 75 100.0
+
+# Output RDF
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_$t.dat mode vector
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_75.dat mode vector
+
+# Run for 5000 steps to gather statistics
+run             5000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 4.571 | 4.571 | 4.571 Mbytes
+   Step          Temp          Press          PotEng         Volume        Density    
+     25001   70.62474       1426.7206     -857.01099      18901.678      1.7547439    
+     26000   73.299529      1529.8559     -851.95119      18901.678      1.7547439    
+     27000   74.551696      1613.9656     -848.23023      18901.678      1.7547439    
+     28000   75.562139      1695.2389     -844.29262      18901.678      1.7547439    
+     29000   70.810989      1593.2577     -848.07638      18901.678      1.7547439    
+     30000   75.250108      1680.1879     -844.55493      18901.678      1.7547439    
+     30001   75.227409      1681.1392     -844.49242      18901.678      1.7547439    
+Loop time of 1.12579 on 1 procs for 5000 steps with 500 atoms
+
+Performance: 383.732 ns/day, 0.063 hours/ns, 4441.341 timesteps/s, 2.221 Matom-step/s
+81.9% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 1.0203     | 1.0203     | 1.0203     |   0.0 | 90.63
+Neigh   | 0.010849   | 0.010849   | 0.010849   |   0.0 |  0.96
+Comm    | 0.02215    | 0.02215    | 0.02215    |   0.0 |  1.97
+Output  | 0.001792   | 0.001792   | 0.001792   |   0.0 |  0.16
+Modify  | 0.040775   | 0.040775   | 0.040775   |   0.0 |  3.62
+Other   |            | 0.02988    |            |       |  2.65
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2150 ave        2150 max        2150 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33659 ave       33659 max       33659 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33659
+Ave neighs/atom = 67.318
+Neighbor list builds = 18
+Dangerous builds = 0
+
+# Calculate average PE for this temperature
+variable        avg_pe equal pe
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_$t.dat
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_75.dat
+
+# Cleanup for next iteration
+unfix           rdf_out
+unfix           1
+unfix           pe_avg
+
+next            temps
+jump            SELF loop_start
+variable        t equal ${temps}
+variable        t equal 80
+
+# Reset timestamp for cleaner logs or just continue
+# We continue to preserve state
+# NVT Simulation
+fix             1 all nvt temp $t $t 100.0
+fix             1 all nvt temp 80 $t 100.0
+fix             1 all nvt temp 80 80 100.0
+
+# Output RDF
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_$t.dat mode vector
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_80.dat mode vector
+
+# Run for 5000 steps to gather statistics
+run             5000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 4.571 | 4.571 | 4.571 Mbytes
+   Step          Temp          Press          PotEng         Volume        Density    
+     30001   75.227409      1681.1392     -844.49242      18901.678      1.7547439    
+     31000   82.936934      1802.0211     -839.23129      18901.678      1.7547439    
+     32000   80.364399      1892.4729     -834.51757      18901.678      1.7547439    
+     33000   85.082887      1749.0527     -842.85253      18901.678      1.7547439    
+     34000   80.952348      1584.8051     -850.76442      18901.678      1.7547439    
+     35000   82.332225      1877.6674     -835.50535      18901.678      1.7547439    
+     35001   82.39706       1876.9613     -835.55906      18901.678      1.7547439    
+Loop time of 1.26034 on 1 procs for 5000 steps with 500 atoms
+
+Performance: 342.766 ns/day, 0.070 hours/ns, 3967.199 timesteps/s, 1.984 Matom-step/s
+78.1% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 1.0731     | 1.0731     | 1.0731     |   0.0 | 85.14
+Neigh   | 0.016082   | 0.016082   | 0.016082   |   0.0 |  1.28
+Comm    | 0.026661   | 0.026661   | 0.026661   |   0.0 |  2.12
+Output  | 0.001794   | 0.001794   | 0.001794   |   0.0 |  0.14
+Modify  | 0.045892   | 0.045892   | 0.045892   |   0.0 |  3.64
+Other   |            | 0.09684    |            |       |  7.68
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2181 ave        2181 max        2181 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33588 ave       33588 max       33588 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33588
+Ave neighs/atom = 67.176
+Neighbor list builds = 21
+Dangerous builds = 0
+
+# Calculate average PE for this temperature
+variable        avg_pe equal pe
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_$t.dat
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_80.dat
+
+# Cleanup for next iteration
+unfix           rdf_out
+unfix           1
+unfix           pe_avg
+
+next            temps
+jump            SELF loop_start
+variable        t equal ${temps}
+variable        t equal 82
+
+# Reset timestamp for cleaner logs or just continue
+# We continue to preserve state
+# NVT Simulation
+fix             1 all nvt temp $t $t 100.0
+fix             1 all nvt temp 82 $t 100.0
+fix             1 all nvt temp 82 82 100.0
+
+# Output RDF
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_$t.dat mode vector
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_82.dat mode vector
+
+# Run for 5000 steps to gather statistics
+run             5000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 4.571 | 4.571 | 4.571 Mbytes
+   Step          Temp          Press          PotEng         Volume        Density    
+     35001   82.39706       1876.9613     -835.55906      18901.678      1.7547439    
+     36000   87.721872      1721.8489     -845.06299      18901.678      1.7547439    
+     37000   79.364829      1777.3235     -839.94661      18901.678      1.7547439    
+     38000   82.434359      1802.7209     -839.29822      18901.678      1.7547439    
+     39000   83.653928      1903.8577     -834.61169      18901.678      1.7547439    
+     40000   83.304103      1893.7811     -834.05938      18901.678      1.7547439    
+     40001   83.308636      1892.5817     -834.11008      18901.678      1.7547439    
+Loop time of 1.15576 on 1 procs for 5000 steps with 500 atoms
+
+Performance: 373.779 ns/day, 0.064 hours/ns, 4326.143 timesteps/s, 2.163 Matom-step/s
+89.2% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 1.0426     | 1.0426     | 1.0426     |   0.0 | 90.21
+Neigh   | 0.022796   | 0.022796   | 0.022796   |   0.0 |  1.97
+Comm    | 0.022978   | 0.022978   | 0.022978   |   0.0 |  1.99
+Output  | 0.001817   | 0.001817   | 0.001817   |   0.0 |  0.16
+Modify  | 0.042254   | 0.042254   | 0.042254   |   0.0 |  3.66
+Other   |            | 0.02332    |            |       |  2.02
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2182 ave        2182 max        2182 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33614 ave       33614 max       33614 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33614
+Ave neighs/atom = 67.228
+Neighbor list builds = 21
+Dangerous builds = 0
+
+# Calculate average PE for this temperature
+variable        avg_pe equal pe
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_$t.dat
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_82.dat
+
+# Cleanup for next iteration
+unfix           rdf_out
+unfix           1
+unfix           pe_avg
+
+next            temps
+jump            SELF loop_start
+variable        t equal ${temps}
+variable        t equal 84
+
+# Reset timestamp for cleaner logs or just continue
+# We continue to preserve state
+# NVT Simulation
+fix             1 all nvt temp $t $t 100.0
+fix             1 all nvt temp 84 $t 100.0
+fix             1 all nvt temp 84 84 100.0
+
+# Output RDF
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_$t.dat mode vector
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_84.dat mode vector
+
+# Run for 5000 steps to gather statistics
+run             5000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 4.571 | 4.571 | 4.571 Mbytes
+   Step          Temp          Press          PotEng         Volume        Density    
+     40001   83.308636      1892.5817     -834.11008      18901.678      1.7547439    
+     41000   82.103175      1875.3738     -835.78897      18901.678      1.7547439    
+     42000   87.338035      1789.3419     -841.09632      18901.678      1.7547439    
+     43000   82.425672      1888.8321     -834.76046      18901.678      1.7547439    
+     44000   80.765031      1821.2669     -838.45914      18901.678      1.7547439    
+     45000   82.946043      1927.1997     -833.30934      18901.678      1.7547439    
+     45001   82.992548      1927.4079     -833.30509      18901.678      1.7547439    
+Loop time of 1.26724 on 1 procs for 5000 steps with 500 atoms
+
+Performance: 340.899 ns/day, 0.070 hours/ns, 3945.586 timesteps/s, 1.973 Matom-step/s
+92.5% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 1.1599     | 1.1599     | 1.1599     |   0.0 | 91.53
+Neigh   | 0.018994   | 0.018994   | 0.018994   |   0.0 |  1.50
+Comm    | 0.023041   | 0.023041   | 0.023041   |   0.0 |  1.82
+Output  | 0.00393    | 0.00393    | 0.00393    |   0.0 |  0.31
+Modify  | 0.046849   | 0.046849   | 0.046849   |   0.0 |  3.70
+Other   |            | 0.01453    |            |       |  1.15
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2178 ave        2178 max        2178 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33633 ave       33633 max       33633 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33633
+Ave neighs/atom = 67.266
+Neighbor list builds = 21
+Dangerous builds = 0
+# Calculate average PE for this temperature
+variable        avg_pe equal pe
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_$t.dat
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_84.dat
+
+# Cleanup for next iteration
+unfix           rdf_out
+unfix           1
+unfix           pe_avg
+
+next            temps
+jump            SELF loop_start
+variable        t equal ${temps}
+variable        t equal 86
+
+# Reset timestamp for cleaner logs or just continue
+# We continue to preserve state
+# NVT Simulation
+fix             1 all nvt temp $t $t 100.0
+fix             1 all nvt temp 86 $t 100.0
+fix             1 all nvt temp 86 86 100.0
+
+# Output RDF
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_$t.dat mode vector
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_86.dat mode vector
+
+# Run for 5000 steps to gather statistics
+run             5000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 4.571 | 4.571 | 4.571 Mbytes
+   Step          Temp          Press          PotEng         Volume        Density    
+     45001   82.992548      1927.4079     -833.30509      18901.678      1.7547439    
+     46000   88.000166      1784.3587     -841.75686      18901.678      1.7547439    
+     47000   81.196384      1950.3673     -832.20594      18901.678      1.7547439    
+     48000   87.204731      1841.5761     -838.71452      18901.678      1.7547439    
+     49000   80.511964      1766.4156     -840.5159       18901.678      1.7547439    
+     50000   82.975486      1904.3498     -834.82133      18901.678      1.7547439    
+     50001   83.07151       1903.8663     -834.85187      18901.678      1.7547439    
+Loop time of 1.29565 on 1 procs for 5000 steps with 500 atoms
+
+Performance: 333.425 ns/day, 0.072 hours/ns, 3859.082 timesteps/s, 1.930 Matom-step/s
+91.7% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 1.185      | 1.185      | 1.185      |   0.0 | 91.46
+Neigh   | 0.016438   | 0.016438   | 0.016438   |   0.0 |  1.27
+Comm    | 0.025315   | 0.025315   | 0.025315   |   0.0 |  1.95
+Output  | 0.001882   | 0.001882   | 0.001882   |   0.0 |  0.15
+Modify  | 0.04678    | 0.04678    | 0.04678    |   0.0 |  3.61
+Other   |            | 0.02024    |            |       |  1.56
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2187 ave        2187 max        2187 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33641 ave       33641 max       33641 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33641
+Ave neighs/atom = 67.282
+Neighbor list builds = 21
+Dangerous builds = 0
+# Calculate average PE for this temperature
+variable        avg_pe equal pe
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_$t.dat
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_86.dat
+
+# Cleanup for next iteration
+unfix           rdf_out
+unfix           1
+unfix           pe_avg
+
+next            temps
+jump            SELF loop_start
+variable        t equal ${temps}
+variable        t equal 88
+
+# Reset timestamp for cleaner logs or just continue
+# We continue to preserve state
+# NVT Simulation
+fix             1 all nvt temp $t $t 100.0
+fix             1 all nvt temp 88 $t 100.0
+fix             1 all nvt temp 88 88 100.0
+
+# Output RDF
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_$t.dat mode vector
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_88.dat mode vector
+
+# Run for 5000 steps to gather statistics
+run             5000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 4.571 | 4.571 | 4.571 Mbytes
+   Step          Temp          Press          PotEng         Volume        Density    
+     50001   83.07151       1903.8663     -834.85187      18901.678      1.7547439    
+     51000   86.80053       1887.3385     -835.56074      18901.678      1.7547439    
+     52000   89.378364      1910.7385     -835.38323      18901.678      1.7547439    
+     53000   84.129703      1804.0998     -839.82564      18901.678      1.7547439    
+     54000   93.375002      1809.113      -841.27083      18901.678      1.7547439    
+     55000   86.720385      2036.424      -827.90555      18901.678      1.7547439    
+     55001   86.610355      2036.2057     -827.87469      18901.678      1.7547439    
+Loop time of 1.30105 on 1 procs for 5000 steps with 500 atoms
+
+Performance: 332.040 ns/day, 0.072 hours/ns, 3843.053 timesteps/s, 1.922 Matom-step/s
+94.9% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 1.192      | 1.192      | 1.192      |   0.0 | 91.62
+Neigh   | 0.014437   | 0.014437   | 0.014437   |   0.0 |  1.11
+Comm    | 0.023179   | 0.023179   | 0.023179   |   0.0 |  1.78
+Output  | 0.001953   | 0.001953   | 0.001953   |   0.0 |  0.15
+Modify  | 0.049166   | 0.049166   | 0.049166   |   0.0 |  3.78
+Other   |            | 0.02028    |            |       |  1.56
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2203 ave        2203 max        2203 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33581 ave       33581 max       33581 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33581
+Ave neighs/atom = 67.162
+Neighbor list builds = 22
+Dangerous builds = 0
+# Calculate average PE for this temperature
+variable        avg_pe equal pe
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_$t.dat
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_88.dat
+
+# Cleanup for next iteration
+unfix           rdf_out
+unfix           1
+unfix           pe_avg
+
+next            temps
+jump            SELF loop_start
+variable        t equal ${temps}
+variable        t equal 90
+
+# Reset timestamp for cleaner logs or just continue
+# We continue to preserve state
+# NVT Simulation
+fix             1 all nvt temp $t $t 100.0
+fix             1 all nvt temp 90 $t 100.0
+fix             1 all nvt temp 90 90 100.0
+
+# Output RDF
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_$t.dat mode vector
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_90.dat mode vector
+
+# Run for 5000 steps to gather statistics
+run             5000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 4.571 | 4.571 | 4.571 Mbytes
+   Step          Temp          Press          PotEng         Volume        Density    
+     55001   86.610355      2036.2057     -827.87469      18901.678      1.7547439    
+     56000   87.009464      2075.5274     -825.56733      18901.678      1.7547439    
+     57000   91.714409      1883.9727     -837.42753      18901.678      1.7547439    
+     58000   91.018451      2004.7542     -831.1365       18901.678      1.7547439    
+     59000   88.129507      2057.8159     -826.80983      18901.678      1.7547439    
+     60000   88.200126      2127.1717     -823.10025      18901.678      1.7547439    
+     60001   88.204889      2125.2387     -823.20486      18901.678      1.7547439    
+Loop time of 1.22232 on 1 procs for 5000 steps with 500 atoms
+
+Performance: 353.426 ns/day, 0.068 hours/ns, 4090.575 timesteps/s, 2.045 Matom-step/s
+90.8% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 1.1246     | 1.1246     | 1.1246     |   0.0 | 92.01
+Neigh   | 0.013464   | 0.013464   | 0.013464   |   0.0 |  1.10
+Comm    | 0.022569   | 0.022569   | 0.022569   |   0.0 |  1.85
+Output  | 0.001946   | 0.001946   | 0.001946   |   0.0 |  0.16
+Modify  | 0.045082   | 0.045082   | 0.045082   |   0.0 |  3.69
+Other   |            | 0.01462    |            |       |  1.20
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2155 ave        2155 max        2155 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33561 ave       33561 max       33561 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33561
+Ave neighs/atom = 67.122
+Neighbor list builds = 21
+Dangerous builds = 0
+
+# 
+# Calculate average PE for this temperature
+variable        avg_pe equal pe
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_$t.dat
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_90.dat
+
+# Cleanup for next iteration
+unfix           rdf_out
+unfix           1
+unfix           pe_avg
+
+next            temps
+jump            SELF loop_start
+variable        t equal ${temps}
+variable        t equal 100
+
+# Reset timestamp for cleaner logs or just continue
+# We continue to preserve state
+# NVT Simulation
+fix             1 all nvt temp $t $t 100.0
+fix             1 all nvt temp 100 $t 100.0
+fix             1 all nvt temp 100 100 100.0
+
+# Output RDF
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_$t.dat mode vector
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_100.dat mode vector
+
+# Run for 5000 steps to gather statistics
+run             5000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 4.571 | 4.571 | 4.571 Mbytes
+   Step          Temp          Press          PotEng         Volume        Density    
+     60001   88.204889      2125.2387     -823.20486      18901.678      1.7547439    
+     61000   106.06148      2335.9785     -815.76829      18901.678      1.7547439    
+     62000   91.946031      2358.6919     -812.24993      18901.678      1.7547439    
+     63000   102.29083      2170.0218     -824.40411      18901.678      1.7547439    
+     64000   94.363574      2317.5266     -814.39481      18901.678      1.7547439    
+     65000   100.59232      2481.638      -806.49862      18901.678      1.7547439    
+     65001   100.5797       2481.0597     -806.51598      18901.678      1.7547439    
+Loop time of 1.30442 on 1 procs for 5000 steps with 500 atoms
+
+Performance: 331.182 ns/day, 0.072 hours/ns, 3833.130 timesteps/s, 1.917 Matom-step/s
+91.0% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 1.1718     | 1.1718     | 1.1718     |   0.0 | 89.83
+Neigh   | 0.016646   | 0.016646   | 0.016646   |   0.0 |  1.28
+Comm    | 0.025193   | 0.025193   | 0.025193   |   0.0 |  1.93
+Output  | 0.001926   | 0.001926   | 0.001926   |   0.0 |  0.15
+Modify  | 0.048675   | 0.048675   | 0.048675   |   0.0 |  3.73
+Other   |            | 0.0402     |            |       |  3.08
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2144 ave        2144 max        2144 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33481 ave       33481 max       33481 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33481
+Ave neighs/atom = 66.962
+Neighbor list builds = 23
+Dangerous builds 
+# 
+# Calculate average PE for this temperature
+variable        avg_pe equal pe
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_$t.dat
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_100.dat
+
+# Cleanup for next iteration
+unfix           rdf_out
+unfix           1
+unfix           pe_avg
+
+next            temps
+jump            SELF loop_start
+variable        t equal ${temps}
+variable        t equal 115
+
+# Reset timestamp for cleaner logs or just continue
+# We continue to preserve state
+# NVT Simulation
+fix             1 all nvt temp $t $t 100.0
+fix             1 all nvt temp 115 $t 100.0
+fix             1 all nvt temp 115 115 100.0
+
+# Output RDF
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_$t.dat mode vector
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_115.dat mode vector
+
+# Run for 5000 steps to gather statistics
+run             5000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 4.571 | 4.571 | 4.571 Mbytes
+   Step          Temp          Press          PotEng         Volume        Density    
+     65001   100.5797       2481.0597     -806.51598      18901.678      1.7547439    
+     66000   117.98959      2761.0572     -795.86653      18901.678      1.7547439    
+     67000   122.27686      2775.6063     -795.89985      18901.678      1.7547439    
+     68000   121.64685      2672.0168     -801.14097      18901.678      1.7547439    
+     69000   123.18341      2778.6561     -795.33746      18901.678      1.7547439    
+     70000   114.23748      2717.5149     -796.2814       18901.678      1.7547439    
+     70001   114.2188       2716.8657     -796.32349      18901.678      1.7547439    
+Loop time of 1.0932 on 1 procs for 5000 steps with 500 atoms
+
+Performance: 395.168 ns/day, 0.061 hours/ns, 4573.708 timesteps/s, 2.287 Matom-step/s
+90.0% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0.98826    | 0.98826    | 0.98826    |   0.0 | 90.40
+Neigh   | 0.015521   | 0.015521   | 0.015521   |   0.0 |  1.42
+Comm    | 0.020747   | 0.020747   | 0.020747   |   0.0 |  1.90
+Output  | 0.002063   | 0.002063   | 0.002063   |   0.0 |  0.19
+Modify  | 0.040584   | 0.040584   | 0.040584   |   0.0 |  3.71
+Other   |            | 0.02603    |            |       |  2.38
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2231 ave        2231 max        2231 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33427 ave       33427 max       33427 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33427
+Ave neighs/atom = 66.854
+Neighbor list builds = 25
+Dangerous builds 
+#
+# Calculate average PE for this temperature
+variable        avg_pe equal pe
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_$t.dat
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_115.dat
+
+# Cleanup for next iteration
+unfix           rdf_out
+unfix           1
+unfix           pe_avg
+
+next            temps
+jump            SELF loop_start
+variable        t equal ${temps}
+variable        t equal 130
+
+# Reset timestamp for cleaner logs or just continue
+# We continue to preserve state
+# NVT Simulation
+fix             1 all nvt temp $t $t 100.0
+fix             1 all nvt temp 130 $t 100.0
+fix             1 all nvt temp 130 130 100.0
+
+# Output RDF
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_$t.dat mode vector
+fix             rdf_out all ave/time 100 1 100 c_rdf[*] file rdf_130.dat mode vector
+
+# Run for 5000 steps to gather statistics
+run             5000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Per MPI rank memory allocation (min/avg/max) = 4.572 | 4.572 | 4.572 Mbytes
+   Step          Temp          Press          PotEng         Volume        Density    
+     70001   114.2188       2716.8657     -796.32349      18901.678      1.7547439    
+     71000   133.09639      2940.0476     -788.57712      18901.678      1.7547439    
+     72000   132.36364      3198.0496     -774.21196      18901.678      1.7547439    
+     73000   135.94617      3249.4539     -772.30047      18901.678      1.7547439    
+     74000   125.2154       3337.4387     -765.54067      18901.678      1.7547439    
+     75000   134.22339      3069.6184     -781.66914      18901.678      1.7547439    
+     75001   134.33462      3065.8589     -781.9034       18901.678      1.7547439    
+Loop time of 1.07354 on 1 procs for 5000 steps with 500 atoms
+
+Performance: 402.405 ns/day, 0.060 hours/ns, 4657.471 timesteps/s, 2.329 Matom-step/s
+91.7% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0.98322    | 0.98322    | 0.98322    |   0.0 | 91.59
+Neigh   | 0.016702   | 0.016702   | 0.016702   |   0.0 |  1.56
+Comm    | 0.021605   | 0.021605   | 0.021605   |   0.0 |  2.01
+Output  | 0.001808   | 0.001808   | 0.001808   |   0.0 |  0.17
+Modify  | 0.042452   | 0.042452   | 0.042452   |   0.0 |  3.95
+Other   |            | 0.007755   |            |       |  0.72
+
+Nlocal:            500 ave         500 max         500 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           2214 ave        2214 max        2214 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:          33327 ave       33327 max       33327 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 33327
+Ave neighs/atom = 66.654
+Neighbor list builds = 28
+Dangerous builds = 0
+
+# Calculate average PE for this temperature
+variable        avg_pe equal pe
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_$t.dat
+fix             pe_avg all ave/time 10 500 5000 v_avg_pe file pe_avg_130.dat
+
+# Cleanup for next iteration
+unfix           rdf_out
+unfix           1
+unfix           pe_avg
+
+next            temps
+jump            SELF loop_start
+Total wall time: 0:00:17

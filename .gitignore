@@ -6,7 +6,11 @@ dist/
 wheels/
 *.egg-info
 
+.pytest_cache/
+
 # Virtual environments
 .venv
 .ruff_cache
 uv.lock
+
+temp/
